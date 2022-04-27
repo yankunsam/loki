@@ -1,14 +1,12 @@
 package util
 
 import (
+	"bytes"
 	"context"
 	"sync"
 
-	"github.com/go-kit/log/level"
-
 	"github.com/grafana/loki/pkg/storage/stores/series/index"
 	util_math "github.com/grafana/loki/pkg/util/math"
-	"github.com/grafana/loki/pkg/util/spanlogger"
 )
 
 const maxQueriesPerGoroutine = 100
@@ -37,21 +35,15 @@ func DoParallelQueries(ctx context.Context, tableQuerier TableQuerier, queries [
 	}
 	errs := make(chan error)
 
-	id := NewIndexDeduper(callback)
-	defer func() {
-		logger := spanlogger.FromContext(ctx)
-		level.Debug(logger).Log("msg", "done processing index queries", "table-name", queries[0].TableName,
-			"query-count", len(queries), "num-entries-sent", id.numEntriesSent)
-	}()
-
 	if len(queries) <= maxQueriesPerGoroutine {
-		return tableQuerier.MultiQueries(ctx, queries, id.Callback)
+		return tableQuerier.MultiQueries(ctx, queries, NewCallbackDeduper(callback))
 	}
 
+	callback = NewSyncCallbackDeduper(callback)
 	for i := 0; i < len(queries); i += maxQueriesPerGoroutine {
 		q := queries[i:util_math.Min(i+maxQueriesPerGoroutine, len(queries))]
 		go func(queries []index.Query) {
-			errs <- tableQuerier.MultiQueries(ctx, queries, id.Callback)
+			errs <- tableQuerier.MultiQueries(ctx, queries, callback)
 		}(q)
 	}
 
@@ -66,90 +58,67 @@ func DoParallelQueries(ctx context.Context, tableQuerier TableQuerier, queries [
 	return lastErr
 }
 
-// IndexDeduper should always be used on table level not the whole query level because it just looks at range values which can be repeated across tables
+var bufferPool = sync.Pool{
+	New: func() interface{} {
+		return bytes.NewBuffer(make([]byte, 0, 4096))
+	},
+}
+
+// NewCallbackDeduper should always be used on table level not the whole query level because it just looks at range values which can be repeated across tables
 // Cortex anyways dedupes entries across tables
-type IndexDeduper struct {
-	callback        index.QueryPagesCallback
-	seenRangeValues map[string]map[string]struct{}
-	numEntriesSent  int
-	mtx             sync.RWMutex
-}
-
-func NewIndexDeduper(callback index.QueryPagesCallback) *IndexDeduper {
-	return &IndexDeduper{
-		callback:        callback,
-		seenRangeValues: map[string]map[string]struct{}{},
+func NewSyncCallbackDeduper(callback index.QueryPagesCallback) index.QueryPagesCallback {
+	seen := sync.Map{}
+	return func(q index.Query, rbr index.ReadBatchResult) bool {
+		return callback(q, &filteringBatch{
+			ReadBatchIterator: rbr.Iterator(),
+			seen: func(rangeValue []byte) bool {
+				buf := bufferPool.Get().(*bytes.Buffer)
+				defer bufferPool.Put(buf)
+				buf.Reset()
+				buf.WriteString(q.HashValue)
+				buf.Write(rangeValue)
+				if _, loaded := seen.Load(GetUnsafeString(buf.Bytes())); loaded {
+					return true
+				}
+				seen.Store(buf.String(), struct{}{})
+				return false
+			},
+		})
 	}
 }
 
-func (i *IndexDeduper) Callback(query index.Query, batch index.ReadBatchResult) bool {
-	return i.callback(query, &filteringBatch{
-		query:           query,
-		ReadBatchResult: batch,
-		isSeen:          i.isSeen,
-	})
+func NewCallbackDeduper(callback index.QueryPagesCallback) index.QueryPagesCallback {
+	return func(q index.Query, rbr index.ReadBatchResult) bool {
+		seen := map[string]struct{}{}
+		return callback(q, &filteringBatch{
+			ReadBatchIterator: rbr.Iterator(),
+			seen: func(rangeValue []byte) bool {
+				h := GetUnsafeString(rangeValue)
+				if _, loaded := seen[h]; loaded {
+					return true
+				}
+				seen[h] = struct{}{}
+				return false
+			},
+		})
+	}
 }
-
-func (i *IndexDeduper) isSeen(hashValue string, rangeValue []byte) bool {
-	i.mtx.RLock()
-
-	// index entries are never modified during query processing so it should be safe to reference a byte slice as a string.
-	rangeValueStr := GetUnsafeString(rangeValue)
-
-	if _, ok := i.seenRangeValues[hashValue][rangeValueStr]; ok {
-		i.mtx.RUnlock()
-		return true
-	}
-
-	i.mtx.RUnlock()
-
-	i.mtx.Lock()
-	defer i.mtx.Unlock()
-
-	// re-check if another concurrent call added the values already, if so do not add it again and return true
-	if _, ok := i.seenRangeValues[hashValue][rangeValueStr]; ok {
-		return true
-	}
-
-	// add the hashValue first if missing
-	if _, ok := i.seenRangeValues[hashValue]; !ok {
-		i.seenRangeValues[hashValue] = map[string]struct{}{}
-	}
-
-	// add the rangeValue
-	i.seenRangeValues[hashValue][rangeValueStr] = struct{}{}
-	i.numEntriesSent++
-	return false
-}
-
-type isSeen func(hashValue string, rangeValue []byte) bool
 
 type filteringBatch struct {
-	query index.Query
-	index.ReadBatchResult
-	isSeen isSeen
+	index.ReadBatchIterator
+
+	seen func([]byte) bool
 }
 
 func (f *filteringBatch) Iterator() index.ReadBatchIterator {
-	return &filteringBatchIter{
-		query:             f.query,
-		ReadBatchIterator: f.ReadBatchResult.Iterator(),
-		isSeen:            f.isSeen,
-	}
+	return f
 }
 
-type filteringBatchIter struct {
-	query index.Query
-	index.ReadBatchIterator
-	isSeen isSeen
-}
-
-func (f *filteringBatchIter) Next() bool {
+func (f *filteringBatch) Next() bool {
 	for f.ReadBatchIterator.Next() {
-		if f.isSeen(f.query.HashValue, f.ReadBatchIterator.RangeValue()) {
+		if f.seen(f.RangeValue()) {
 			continue
 		}
-
 		return true
 	}
 
