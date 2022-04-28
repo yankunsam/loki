@@ -1,7 +1,6 @@
 package util
 
 import (
-	"bytes"
 	"context"
 	"sync"
 
@@ -58,12 +57,6 @@ func DoParallelQueries(ctx context.Context, tableQuerier TableQuerier, queries [
 	return lastErr
 }
 
-var bufferPool = sync.Pool{
-	New: func() interface{} {
-		return bytes.NewBuffer(make([]byte, 0, 4096))
-	},
-}
-
 // NewCallbackDeduper should always be used on table level not the whole query level because it just looks at range values which can be repeated across tables
 // Cortex anyways dedupes entries across tables
 func NewSyncCallbackDeduper(callback index.QueryPagesCallback) index.QueryPagesCallback {
@@ -72,36 +65,61 @@ func NewSyncCallbackDeduper(callback index.QueryPagesCallback) index.QueryPagesC
 		return callback(q, &filteringBatch{
 			ReadBatchIterator: rbr.Iterator(),
 			seen: func(rangeValue []byte) bool {
-				buf := bufferPool.Get().(*bytes.Buffer)
-				defer bufferPool.Put(buf)
-				buf.Reset()
-				buf.WriteString(q.HashValue)
-				buf.Write(rangeValue)
-				if _, loaded := seen.Load(GetUnsafeString(buf.Bytes())); loaded {
-					return true
+				any, ok := seen.Load(q.HashValue)
+				if !ok {
+					hashes := &sync.Map{}
+					hashes.Store(GetUnsafeString(rangeValue), struct{}{})
+					seen.Store(q.HashValue, hashes)
+					return false
 				}
-				seen.Store(buf.String(), struct{}{})
-				return false
+				hashes := any.(*sync.Map)
+				_, loaded := hashes.LoadOrStore(GetUnsafeString(rangeValue), struct{}{})
+				return loaded
 			},
 		})
 	}
 }
 
 func NewCallbackDeduper(callback index.QueryPagesCallback) index.QueryPagesCallback {
-	return func(q index.Query, rbr index.ReadBatchResult) bool {
-		seen := map[string]struct{}{}
-		return callback(q, &filteringBatch{
-			ReadBatchIterator: rbr.Iterator(),
-			seen: func(rangeValue []byte) bool {
-				h := GetUnsafeString(rangeValue)
-				if _, loaded := seen[h]; loaded {
-					return true
-				}
-				seen[h] = struct{}{}
-				return false
-			},
-		})
+	f := &filter{
+		seen: map[string]map[string]struct{}{},
 	}
+	return func(q index.Query, rbr index.ReadBatchResult) bool {
+		f.hashValue = q.HashValue
+		f.ReadBatchIterator = rbr.Iterator()
+		return callback(q, f)
+	}
+}
+
+type filter struct {
+	index.ReadBatchIterator
+	hashValue string
+	seen      map[string]map[string]struct{}
+}
+
+func (f *filter) Iterator() index.ReadBatchIterator {
+	return f
+}
+
+func (f *filter) Next() bool {
+	for f.ReadBatchIterator.Next() {
+		rangeValue := f.RangeValue()
+		hashes, ok := f.seen[f.hashValue]
+		if !ok {
+			hashes = map[string]struct{}{}
+			hashes[GetUnsafeString(rangeValue)] = struct{}{}
+			f.seen[f.hashValue] = hashes
+			return true
+		}
+		h := GetUnsafeString(rangeValue)
+		if _, loaded := hashes[h]; loaded {
+			continue
+		}
+		hashes[h] = struct{}{}
+		return true
+	}
+
+	return false
 }
 
 type filteringBatch struct {

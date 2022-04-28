@@ -257,6 +257,65 @@ func (b *BoltIndexClient) QueryDB(ctx context.Context, db *bbolt.DB, bucketName 
 	})
 }
 
+type cursorBatch struct {
+	cursor    *bbolt.Cursor
+	query     *index.Query
+	start     []byte
+	rowPrefix []byte
+	seeked    bool
+
+	currRangeValue []byte
+	currValue      []byte
+}
+
+func (c *cursorBatch) Iterator() index.ReadBatchIterator {
+	return c
+}
+
+func (c *cursorBatch) nextItem() ([]byte, []byte) {
+	if !c.seeked {
+		c.seeked = true
+		return c.cursor.Seek(c.start)
+	}
+	return c.cursor.Next()
+}
+
+func (c *cursorBatch) Next() bool {
+	for k, v := c.nextItem(); k != nil; k, v = c.nextItem() {
+		if !bytes.HasPrefix(k, c.rowPrefix) {
+			break
+		}
+
+		if len(c.query.RangeValuePrefix) > 0 && !bytes.HasPrefix(k, c.start) {
+			break
+		}
+		if len(c.query.ValueEqual) > 0 && !bytes.Equal(v, c.query.ValueEqual) {
+			continue
+		}
+
+		// make a copy since k, v are only valid for the life of the transaction.
+		// See: https://godoc.org/github.com/boltdb/bolt#Cursor.Seek
+		rangeValue := make([]byte, len(k)-len(c.rowPrefix))
+		copy(rangeValue, k[len(c.rowPrefix):])
+
+		value := make([]byte, len(v))
+		copy(value, v)
+
+		c.currRangeValue = rangeValue
+		c.currValue = value
+		return true
+	}
+	return false
+}
+
+func (c *cursorBatch) RangeValue() []byte {
+	return c.currRangeValue
+}
+
+func (c *cursorBatch) Value() []byte {
+	return c.currValue
+}
+
 func (b *BoltIndexClient) QueryWithCursor(_ context.Context, c *bbolt.Cursor, query index.Query, callback index.QueryPagesCallback) error {
 	var start []byte
 	if len(query.RangeValuePrefix) > 0 {
@@ -269,56 +328,13 @@ func (b *BoltIndexClient) QueryWithCursor(_ context.Context, c *bbolt.Cursor, qu
 
 	rowPrefix := []byte(query.HashValue + separator)
 
-	// sync.WaitGroup is needed to wait for the caller to finish processing all the index entries being streamed
-	wg := sync.WaitGroup{}
-	batch := newReadBatch()
-	defer func() {
-		batch.done()
-		wg.Wait()
-	}()
-
-	callbackDone := false
-
-	for k, v := c.Seek(start); k != nil; k, v = c.Next() {
-		if !bytes.HasPrefix(k, rowPrefix) {
-			break
-		}
-
-		if len(query.RangeValuePrefix) > 0 && !bytes.HasPrefix(k, start) {
-			break
-		}
-		if len(query.ValueEqual) > 0 && !bytes.Equal(v, query.ValueEqual) {
-			continue
-		}
-
-		// we need to do callback only once to pass the batch iterator
-		if !callbackDone {
-			wg.Add(1)
-			// do the callback in a goroutine to stream back the index entries
-			go func() {
-				// wait for callback to finish processing the batch and return
-				defer wg.Done()
-				callback(query, batch)
-			}()
-			callbackDone = true
-		}
-
-		// make a copy since k, v are only valid for the life of the transaction.
-		// See: https://godoc.org/github.com/boltdb/bolt#Cursor.Seek
-		rangeValue := make([]byte, len(k)-len(rowPrefix))
-		copy(rangeValue, k[len(rowPrefix):])
-
-		value := make([]byte, len(v))
-		copy(value, v)
-
-		err := batch.send(singleResponse{
-			rangeValue: rangeValue,
-			value:      value,
-		})
-		if err != nil {
-			return errors.Wrap(err, "failed to send row while processing boltdb index query")
-		}
-	}
+	callback(query, &cursorBatch{
+		cursor:    c,
+		start:     start,
+		rowPrefix: rowPrefix,
+		query:     &query,
+		seeked:    false,
+	})
 
 	return nil
 }
@@ -357,51 +373,6 @@ func (b *BoltWriteBatch) Add(tableName, hashValue string, rangeValue []byte, val
 
 	key := hashValue + separator + string(rangeValue)
 	writes.puts[key] = value
-}
-
-type singleResponse struct {
-	rangeValue []byte
-	value      []byte
-}
-
-type readBatch struct {
-	respChan chan singleResponse
-	curr     singleResponse
-}
-
-func newReadBatch() *readBatch {
-	return &readBatch{respChan: make(chan singleResponse)}
-}
-
-func (r *readBatch) Iterator() index.ReadBatchIterator {
-	return r
-}
-
-func (r *readBatch) Next() bool {
-	var ok bool
-	r.curr, ok = <-r.respChan
-	return ok
-}
-
-func (r *readBatch) RangeValue() []byte {
-	return r.curr.rangeValue
-}
-
-func (r *readBatch) Value() []byte {
-	return r.curr.value
-}
-
-func (r *readBatch) done() {
-	close(r.respChan)
-}
-
-func (r *readBatch) send(resp singleResponse) error {
-	select {
-	case r.respChan <- resp:
-		return nil
-	case <-time.After(10 * time.Second):
-		return errors.New("timed out sending response")
-	}
 }
 
 // Open the database.

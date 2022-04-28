@@ -158,7 +158,7 @@ func TestIndexDeduper(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			actualValues := map[string][][]byte{}
-			deduper := NewCallbackDeduper(func(query index.Query, readBatch index.ReadBatchResult) bool {
+			deduper := NewSyncCallbackDeduper(func(query index.Query, readBatch index.ReadBatchResult) bool {
 				itr := readBatch.Iterator()
 				for itr.Next() {
 					actualValues[query.HashValue] = append(actualValues[query.HashValue], itr.RangeValue())
@@ -217,13 +217,14 @@ func Benchmark_DedupeCallback(b *testing.B) {
 		return true
 	})
 	q := index.Query{HashValue: "1"}
-	batch := batch{
+	batch1 := batch{
 		hashValue:   "1",
 		rangeValues: [][]byte{[]byte("a"), []byte("b"), []byte("c")},
 	}
+
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		deduper(q, batch)
+		deduper(q, batch1)
 	}
 }
