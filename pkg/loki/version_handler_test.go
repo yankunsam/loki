@@ -22,7 +22,7 @@ func TestVersionHandler(t *testing.T) {
 	req := httptest.NewRequest("GET", "http://test.com/config?mode=diff", nil)
 	w := httptest.NewRecorder()
 
-	h := versionHandler()
+	h := build.VersionHandler()
 	h(w, req)
 	resp := w.Result()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)

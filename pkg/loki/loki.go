@@ -47,6 +47,7 @@ import (
 	"github.com/grafana/loki/pkg/tracing"
 	"github.com/grafana/loki/pkg/usagestats"
 	"github.com/grafana/loki/pkg/util"
+	"github.com/grafana/loki/pkg/util/build"
 	"github.com/grafana/loki/pkg/util/fakeauth"
 	util_log "github.com/grafana/loki/pkg/util/log"
 	serverutil "github.com/grafana/loki/pkg/util/server"
@@ -362,8 +363,7 @@ func (t *Loki) Run(opts RunOpts) error {
 	t.bindConfigEndpoint(opts)
 
 	// Each component serves its version.
-	t.Server.HTTP.Path("/loki/api/v1/status/buildinfo").Methods("GET").HandlerFunc(versionHandler())
-
+	t.Server.HTTP.Path("/loki/api/v1/status/buildinfo").Methods("GET").HandlerFunc(build.VersionHandler())
 	t.Server.HTTP.Path("/debug/fgprof").Methods("GET", "POST").Handler(fgprof.Handler())
 
 	// Let's listen for events from this manager, and log them.
