@@ -60,6 +60,7 @@ type Fetcher struct {
 	asyncQueue chan []chunk.Chunk
 	stopOnce   sync.Once
 	stop       chan struct{}
+	cs         *chunkStats
 }
 
 type decodeRequest struct {
@@ -84,6 +85,7 @@ func New(cacher cache.Cache, cacheStubs bool, schema config.SchemaConfig, storag
 		maxAsyncConcurrency: maxAsyncConcurrency,
 		maxAsyncBufferSize:  maxAsyncBufferSize,
 		stop:                make(chan struct{}),
+		cs:                  newChunkStats(),
 	}
 
 	c.wait.Add(chunkDecodeParallelism)
@@ -132,6 +134,7 @@ func (c *Fetcher) Stop() {
 		close(c.decodeRequests)
 		c.wait.Wait()
 		c.cache.Stop()
+		c.cs.Stop()
 		close(c.stop)
 	})
 }
@@ -167,6 +170,9 @@ func (c *Fetcher) FetchChunks(ctx context.Context, chunks []chunk.Chunk, keys []
 	}
 	log, ctx := spanlogger.New(ctx, "ChunkStore.FetchChunks")
 	defer log.Span.Finish()
+
+	// Async record everything about the chunks
+	go c.cs.Record(chunks, keys)
 
 	// Now fetch the actual chunk data from Memcache / S3
 	cacheHits, cacheBufs, _, err := c.cache.Fetch(ctx, keys)
