@@ -66,6 +66,10 @@ func (s *chunkStats) recordTS(chunks []chunk.Chunk) {
 func (s *chunkStats) Stop() {
 	s.stopMu.Lock()
 	defer s.stopMu.Unlock()
+	if s.stopped {
+		return
+	}
+
 	s.stopped = true
 	close(s.stopChan)
 }
@@ -102,6 +106,7 @@ func (s *chunkStats) writeFiles() {
 		fmt.Fprintf(tsFile, "%d,%d\n", k, v)
 	}
 	tsFile.Close()
+	s.Stop()
 }
 
 func (s *chunkStats) reportLoop() {
