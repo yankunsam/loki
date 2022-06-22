@@ -32,7 +32,7 @@ func (m mockStore) LabelValuesForMetricName(ctx context.Context, userID string, 
 
 func (m mockStore) SetChunkFilterer(f chunk.RequestChunkFilterer) {}
 
-func (m mockStore) GetChunkRefs(tx context.Context, userID string, from, through model.Time, matchers ...*labels.Matcher) ([][]chunk.Chunk, []*fetcher.Fetcher, error) {
+func (m mockStore) GetChunkRefs(tx context.Context, userID string, from, through model.Time, matchers ...*labels.Matcher) ([][]chunk.Chunk, []fetcher.Fetcher, error) {
 	return nil, nil, nil
 }
 
@@ -44,7 +44,7 @@ func (m mockStore) LabelNamesForMetricName(ctx context.Context, userID string, f
 	return nil, nil
 }
 
-func (m mockStore) GetChunkFetcher(tm model.Time) *fetcher.Fetcher {
+func (m mockStore) GetChunkFetcher(tm model.Time) fetcher.Fetcher {
 	return nil
 }
 
@@ -240,10 +240,10 @@ func TestCompositeStoreLabels(t *testing.T) {
 
 type mockStoreGetChunkFetcher struct {
 	mockStore
-	chunkFetcher *fetcher.Fetcher
+	chunkFetcher fetcher.Fetcher
 }
 
-func (m mockStoreGetChunkFetcher) GetChunkFetcher(tm model.Time) *fetcher.Fetcher {
+func (m mockStoreGetChunkFetcher) GetChunkFetcher(tm model.Time) fetcher.Fetcher {
 	return m.chunkFetcher
 }
 
@@ -258,7 +258,7 @@ func TestCompositeStore_GetChunkFetcher(t *testing.T) {
 	for _, tc := range []struct {
 		name            string
 		tm              model.Time
-		expectedFetcher *fetcher.Fetcher
+		expectedFetcher fetcher.Fetcher
 	}{
 		{
 			name: "no matching store",

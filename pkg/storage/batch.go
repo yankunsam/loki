@@ -686,7 +686,7 @@ func fetchLazyChunks(ctx context.Context, s config.SchemaConfig, chunks []*LazyC
 		stats.AddChunksDownloaded(totalChunks)
 	}()
 
-	chksByFetcher := map[*fetcher.Fetcher][]*LazyChunk{}
+	chksByFetcher := map[fetcher.Fetcher][]*LazyChunk{}
 	for _, c := range chunks {
 		if c.Chunk.Data == nil {
 			chksByFetcher[c.Fetcher] = append(chksByFetcher[c.Fetcher], c)

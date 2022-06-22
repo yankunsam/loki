@@ -278,9 +278,9 @@ func (s *storeMock) SelectSamples(ctx context.Context, req logql.SelectSamplePar
 	return res.(iter.SampleIterator), args.Error(1)
 }
 
-func (s *storeMock) GetChunkRefs(ctx context.Context, userID string, from, through model.Time, matchers ...*labels.Matcher) ([][]chunk.Chunk, []*fetcher.Fetcher, error) {
+func (s *storeMock) GetChunkRefs(ctx context.Context, userID string, from, through model.Time, matchers ...*labels.Matcher) ([][]chunk.Chunk, []fetcher.Fetcher, error) {
 	args := s.Called(ctx, userID, from, through, matchers)
-	return args.Get(0).([][]chunk.Chunk), args.Get(0).([]*fetcher.Fetcher), args.Error(2)
+	return args.Get(0).([][]chunk.Chunk), args.Get(0).([]fetcher.Fetcher), args.Error(2)
 }
 
 func (s *storeMock) Put(ctx context.Context, chunks []chunk.Chunk) error {
@@ -301,7 +301,7 @@ func (s *storeMock) LabelNamesForMetricName(ctx context.Context, userID string, 
 	return args.Get(0).([]string), args.Error(1)
 }
 
-func (s *storeMock) GetChunkFetcher(_ model.Time) *fetcher.Fetcher {
+func (s *storeMock) GetChunkFetcher(_ model.Time) fetcher.Fetcher {
 	panic("don't call me please")
 }
 

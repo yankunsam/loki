@@ -27,14 +27,14 @@ func newStoreMock() *storeMock {
 	return &storeMock{}
 }
 
-func (s *storeMock) GetChunkRefs(ctx context.Context, userID string, from, through model.Time, matchers ...*labels.Matcher) ([][]chunk.Chunk, []*fetcher.Fetcher, error) {
+func (s *storeMock) GetChunkRefs(ctx context.Context, userID string, from, through model.Time, matchers ...*labels.Matcher) ([][]chunk.Chunk, []fetcher.Fetcher, error) {
 	args := s.Called(ctx, userID, from, through, matchers)
-	return args.Get(0).([][]chunk.Chunk), args.Get(1).([]*fetcher.Fetcher), args.Error(2)
+	return args.Get(0).([][]chunk.Chunk), args.Get(1).([]fetcher.Fetcher), args.Error(2)
 }
 
-func (s *storeMock) GetChunkFetcher(tm model.Time) *fetcher.Fetcher {
+func (s *storeMock) GetChunkFetcher(tm model.Time) fetcher.Fetcher {
 	args := s.Called(tm)
-	return args.Get(0).(*fetcher.Fetcher)
+	return args.Get(0).(fetcher.Fetcher)
 }
 
 type ingesterQuerierMock struct {
@@ -80,8 +80,8 @@ func buildMockChunkRef(t *testing.T, num int) []chunk.Chunk {
 	return chunks
 }
 
-func buildMockFetchers(num int) []*fetcher.Fetcher {
-	var fetchers []*fetcher.Fetcher
+func buildMockFetchers(num int) []fetcher.Fetcher {
+	var fetchers []fetcher.Fetcher
 	for i := 0; i < num; i++ {
 		fetchers = append(fetchers, &fetcher.Fetcher{})
 	}
@@ -106,11 +106,11 @@ func TestAsyncStore_mergeIngesterAndStoreChunks(t *testing.T) {
 	for _, tc := range []struct {
 		name             string
 		storeChunks      [][]chunk.Chunk
-		storeFetcher     []*fetcher.Fetcher
+		storeFetcher     []fetcher.Fetcher
 		ingesterChunkIDs []string
-		ingesterFetcher  *fetcher.Fetcher
+		ingesterFetcher  fetcher.Fetcher
 		expectedChunks   [][]chunk.Chunk
-		expectedFetchers []*fetcher.Fetcher
+		expectedFetchers []fetcher.Fetcher
 	}{
 		{
 			name: "no chunks from both",
@@ -264,7 +264,7 @@ func TestAsyncStore_QueryIngestersWithin(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newStoreMock()
-			store.On("GetChunkRefs", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([][]chunk.Chunk{}, []*fetcher.Fetcher{}, nil)
+			store.On("GetChunkRefs", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([][]chunk.Chunk{}, []fetcher.Fetcher{}, nil)
 
 			ingesterQuerier := newIngesterQuerierMock()
 			ingesterQuerier.On("GetChunkIDs", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]string{}, nil)

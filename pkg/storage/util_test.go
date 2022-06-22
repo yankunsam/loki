@@ -228,11 +228,11 @@ func (m *mockChunkStore) Get(ctx context.Context, userID string, from, through m
 	return nil, nil
 }
 
-func (m *mockChunkStore) GetChunkFetcher(_ model.Time) *fetcher.Fetcher {
+func (m *mockChunkStore) GetChunkFetcher(_ model.Time) fetcher.Fetcher {
 	return nil
 }
 
-func (m *mockChunkStore) GetChunkRefs(ctx context.Context, userID string, from, through model.Time, matchers ...*labels.Matcher) ([][]chunk.Chunk, []*fetcher.Fetcher, error) {
+func (m *mockChunkStore) GetChunkRefs(ctx context.Context, userID string, from, through model.Time, matchers ...*labels.Matcher) ([][]chunk.Chunk, []fetcher.Fetcher, error) {
 	refs := make([]chunk.Chunk, 0, len(m.chunks))
 	// transform real chunks into ref chunks.
 	for _, c := range m.chunks {
@@ -252,7 +252,7 @@ func (m *mockChunkStore) GetChunkRefs(ctx context.Context, userID string, from, 
 	if err != nil {
 		panic(err)
 	}
-	return [][]chunk.Chunk{refs}, []*fetcher.Fetcher{f}, nil
+	return [][]chunk.Chunk{refs}, []fetcher.Fetcher{f}, nil
 }
 
 func (m *mockChunkStore) Stats(ctx context.Context, userID string, from, through model.Time, matchers ...*labels.Matcher) (*index_stats.Stats, error) {

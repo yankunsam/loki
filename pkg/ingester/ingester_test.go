@@ -302,7 +302,7 @@ func (s *mockStore) PutOne(ctx context.Context, from, through model.Time, chunk 
 	return nil
 }
 
-func (s *mockStore) GetChunkRefs(ctx context.Context, userID string, from, through model.Time, matchers ...*labels.Matcher) ([][]chunk.Chunk, []*fetcher.Fetcher, error) {
+func (s *mockStore) GetChunkRefs(ctx context.Context, userID string, from, through model.Time, matchers ...*labels.Matcher) ([][]chunk.Chunk, []fetcher.Fetcher, error) {
 	return nil, nil, nil
 }
 
@@ -314,7 +314,7 @@ func (s *mockStore) LabelNamesForMetricName(ctx context.Context, userID string, 
 	return nil, nil
 }
 
-func (s *mockStore) GetChunkFetcher(tm model.Time) *fetcher.Fetcher {
+func (s *mockStore) GetChunkFetcher(tm model.Time) fetcher.Fetcher {
 	return nil
 }
 

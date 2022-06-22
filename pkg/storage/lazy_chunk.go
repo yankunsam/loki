@@ -20,7 +20,7 @@ import (
 type LazyChunk struct {
 	Chunk   chunk.Chunk
 	IsValid bool
-	Fetcher *fetcher.Fetcher
+	Fetcher fetcher.Fetcher
 
 	// cache of overlapping block.
 	// We use the offset of the block as key since it's unique per chunk.

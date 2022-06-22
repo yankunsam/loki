@@ -48,13 +48,13 @@ func NewAsyncStore(cfg AsyncStoreCfg, store stores.Store, scfg config.SchemaConf
 	}
 }
 
-func (a *AsyncStore) GetChunkRefs(ctx context.Context, userID string, from, through model.Time, matchers ...*labels.Matcher) ([][]chunk.Chunk, []*fetcher.Fetcher, error) {
+func (a *AsyncStore) GetChunkRefs(ctx context.Context, userID string, from, through model.Time, matchers ...*labels.Matcher) ([][]chunk.Chunk, []fetcher.Fetcher, error) {
 	spanLogger := spanlogger.FromContext(ctx)
 
 	errs := make(chan error)
 
 	var storeChunks [][]chunk.Chunk
-	var fetchers []*fetcher.Fetcher
+	var fetchers []fetcher.Fetcher
 	go func() {
 		var err error
 		storeChunks, fetchers, err = a.Store.GetChunkRefs(ctx, userID, from, through, matchers...)
@@ -97,11 +97,11 @@ func (a *AsyncStore) GetChunkRefs(ctx context.Context, userID string, from, thro
 	return a.mergeIngesterAndStoreChunks(userID, storeChunks, fetchers, ingesterChunks)
 }
 
-func (a *AsyncStore) mergeIngesterAndStoreChunks(userID string, storeChunks [][]chunk.Chunk, fetchers []*fetcher.Fetcher, ingesterChunkIDs []string) ([][]chunk.Chunk, []*fetcher.Fetcher, error) {
+func (a *AsyncStore) mergeIngesterAndStoreChunks(userID string, storeChunks [][]chunk.Chunk, fetchers []fetcher.Fetcher, ingesterChunkIDs []string) ([][]chunk.Chunk, []fetcher.Fetcher, error) {
 	ingesterChunkIDs = filterDuplicateChunks(a.scfg, storeChunks, ingesterChunkIDs)
 	level.Debug(util_log.Logger).Log("msg", "post-filtering ingester chunks", "count", len(ingesterChunkIDs))
 
-	fetcherToChunksGroupIdx := make(map[*fetcher.Fetcher]int, len(fetchers))
+	fetcherToChunksGroupIdx := make(map[fetcher.Fetcher]int, len(fetchers))
 
 	for i, fetcher := range fetchers {
 		fetcherToChunksGroupIdx[fetcher] = i
