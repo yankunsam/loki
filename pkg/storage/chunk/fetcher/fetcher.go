@@ -42,10 +42,19 @@ var (
 
 const chunkDecodeParallelism = 16
 
+type Fetcher interface {
+	Stop()
+	Cache() cache.Cache
+	Client() client.Client
+	FetchChunks(ctx context.Context, chunks []chunk.Chunk, keys []string) ([]chunk.Chunk, error)
+	WriteBackCache(ctx context.Context, chunks []chunk.Chunk) error
+	IsChunkNotFoundErr(err error) bool
+}
+
 // Fetcher deals with fetching chunk contents from the cache/store,
 // and writing back any misses to the cache.  Also responsible for decoding
 // chunks from the cache, in parallel.
-type Fetcher struct {
+type fetcher struct {
 	schema     config.SchemaConfig
 	storage    client.Client
 	cache      cache.Cache
@@ -74,8 +83,8 @@ type decodeResponse struct {
 }
 
 // New makes a new ChunkFetcher.
-func New(cacher cache.Cache, cacheStubs bool, schema config.SchemaConfig, storage client.Client, maxAsyncConcurrency int, maxAsyncBufferSize int) (*Fetcher, error) {
-	c := &Fetcher{
+func New(cacher cache.Cache, cacheStubs bool, schema config.SchemaConfig, storage client.Client, maxAsyncConcurrency int, maxAsyncBufferSize int) (*fetcher, error) {
+	c := &fetcher{
 		schema:              schema,
 		storage:             storage,
 		cache:               cacher,
@@ -101,7 +110,7 @@ func New(cacher cache.Cache, cacheStubs bool, schema config.SchemaConfig, storag
 	return c, nil
 }
 
-func (c *Fetcher) writeBackCacheAsync(fromStorage []chunk.Chunk) error {
+func (c *fetcher) writeBackCacheAsync(fromStorage []chunk.Chunk) error {
 	select {
 	case c.asyncQueue <- fromStorage:
 		chunkFetcherCacheQueueEnqueue.Add(float64(len(fromStorage)))
@@ -111,7 +120,7 @@ func (c *Fetcher) writeBackCacheAsync(fromStorage []chunk.Chunk) error {
 	}
 }
 
-func (c *Fetcher) asyncWriteBackCacheQueueProcessLoop() {
+func (c *fetcher) asyncWriteBackCacheQueueProcessLoop() {
 	for {
 		select {
 		case fromStorage := <-c.asyncQueue:
@@ -127,7 +136,7 @@ func (c *Fetcher) asyncWriteBackCacheQueueProcessLoop() {
 }
 
 // Stop the ChunkFetcher.
-func (c *Fetcher) Stop() {
+func (c *fetcher) Stop() {
 	c.stopOnce.Do(func() {
 		close(c.decodeRequests)
 		c.wait.Wait()
@@ -136,7 +145,7 @@ func (c *Fetcher) Stop() {
 	})
 }
 
-func (c *Fetcher) worker() {
+func (c *fetcher) worker() {
 	defer c.wait.Done()
 	decodeContext := chunk.NewDecodeContext()
 	for req := range c.decodeRequests {
@@ -151,17 +160,17 @@ func (c *Fetcher) worker() {
 	}
 }
 
-func (c *Fetcher) Cache() cache.Cache {
+func (c *fetcher) Cache() cache.Cache {
 	return c.cache
 }
 
-func (c *Fetcher) Client() client.Client {
+func (c *fetcher) Client() client.Client {
 	return c.storage
 }
 
 // FetchChunks fetches a set of chunks from cache and store. Note that the keys passed in must be
 // lexicographically sorted, while the returned chunks are not in the same order as the passed in chunks.
-func (c *Fetcher) FetchChunks(ctx context.Context, chunks []chunk.Chunk, keys []string) ([]chunk.Chunk, error) {
+func (c *fetcher) FetchChunks(ctx context.Context, chunks []chunk.Chunk, keys []string) ([]chunk.Chunk, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
@@ -211,7 +220,7 @@ func (c *Fetcher) FetchChunks(ctx context.Context, chunks []chunk.Chunk, keys []
 	return allChunks, nil
 }
 
-func (c *Fetcher) WriteBackCache(ctx context.Context, chunks []chunk.Chunk) error {
+func (c *fetcher) WriteBackCache(ctx context.Context, chunks []chunk.Chunk) error {
 	keys := make([]string, 0, len(chunks))
 	bufs := make([][]byte, 0, len(chunks))
 	for i := range chunks {
@@ -238,7 +247,7 @@ func (c *Fetcher) WriteBackCache(ctx context.Context, chunks []chunk.Chunk) erro
 
 // ProcessCacheResponse decodes the chunks coming back from the cache, separating
 // hits and misses.
-func (c *Fetcher) processCacheResponse(ctx context.Context, chunks []chunk.Chunk, keys []string, bufs [][]byte) ([]chunk.Chunk, []chunk.Chunk, error) {
+func (c *fetcher) processCacheResponse(ctx context.Context, chunks []chunk.Chunk, keys []string, bufs [][]byte) ([]chunk.Chunk, []chunk.Chunk, error) {
 	var (
 		requests  = make([]decodeRequest, 0, len(keys))
 		responses = make(chan decodeResponse)
@@ -294,6 +303,6 @@ func (c *Fetcher) processCacheResponse(ctx context.Context, chunks []chunk.Chunk
 	return found, missing, err
 }
 
-func (c *Fetcher) IsChunkNotFoundErr(err error) bool {
+func (c *fetcher) IsChunkNotFoundErr(err error) bool {
 	return c.storage.IsChunkNotFoundErr(err)
 }

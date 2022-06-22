@@ -31,7 +31,7 @@ type store struct {
 // Each call to NewStore will always build a new stores.ChunkWriter even if the store was already initialized since
 // fetcher.Fetcher instances could be different due to periodic configs having different types of object storage configured
 // for storing chunks.
-func NewStore(indexShipperCfg indexshipper.Config, p config.PeriodConfig, f *fetcher.Fetcher,
+func NewStore(indexShipperCfg indexshipper.Config, p config.PeriodConfig, f fetcher.Fetcher,
 	objectClient client.ObjectClient, limits downloads.Limits, tableRanges config.TableRanges, reg prometheus.Registerer) (stores.ChunkWriter, series.IndexStore, error) {
 	if storeInstance == nil {
 		storeInstance = &store{}

@@ -39,12 +39,12 @@ type compositeStoreEntry struct {
 type storeEntry struct {
 	limits  StoreLimits
 	stop    func()
-	fetcher *fetcher.Fetcher
+	fetcher fetcher.Fetcher
 	index   series.IndexStore
 	ChunkWriter
 }
 
-func (c *storeEntry) GetChunkRefs(ctx context.Context, userID string, from, through model.Time, allMatchers ...*labels.Matcher) ([][]chunk.Chunk, []*fetcher.Fetcher, error) {
+func (c *storeEntry) GetChunkRefs(ctx context.Context, userID string, from, through model.Time, allMatchers ...*labels.Matcher) ([][]chunk.Chunk, []fetcher.Fetcher, error) {
 	if ctx.Err() != nil {
 		return nil, nil, ctx.Err()
 	}
@@ -67,7 +67,7 @@ func (c *storeEntry) GetChunkRefs(ctx context.Context, userID string, from, thro
 		}
 	}
 
-	return [][]chunk.Chunk{chunks}, []*fetcher.Fetcher{c.fetcher}, err
+	return [][]chunk.Chunk{chunks}, []fetcher.Fetcher{c.fetcher}, err
 }
 
 func (c *storeEntry) GetSeries(ctx context.Context, userID string, from, through model.Time, matchers ...*labels.Matcher) ([]labels.Labels, error) {
@@ -151,7 +151,7 @@ func (c *storeEntry) validateQueryTimeRange(ctx context.Context, userID string, 
 	return false, nil
 }
 
-func (c *storeEntry) GetChunkFetcher(tm model.Time) *fetcher.Fetcher {
+func (c *storeEntry) GetChunkFetcher(tm model.Time) fetcher.Fetcher {
 	return c.fetcher
 }
 

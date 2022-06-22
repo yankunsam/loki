@@ -202,7 +202,7 @@ func shouldUseIndexGatewayClient(cfg indexshipper.Config) bool {
 	return true
 }
 
-func (s *store) storeForPeriod(p config.PeriodConfig, chunkClient client.Client, f *fetcher.Fetcher) (stores.ChunkWriter, series.IndexStore, func(), error) {
+func (s *store) storeForPeriod(p config.PeriodConfig, chunkClient client.Client, f fetcher.Fetcher) (stores.ChunkWriter, series.IndexStore, func(), error) {
 	indexClientReg := prometheus.WrapRegistererWith(
 		prometheus.Labels{"component": "index-store-" + p.From.String()}, s.registerer)
 

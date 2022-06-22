@@ -24,7 +24,7 @@ type Store interface {
 	GetSeries(ctx context.Context, userID string, from, through model.Time, matchers ...*labels.Matcher) ([]labels.Labels, error)
 	LabelValuesForMetricName(ctx context.Context, userID string, from, through model.Time, metricName string, labelName string, matchers ...*labels.Matcher) ([]string, error)
 	LabelNamesForMetricName(ctx context.Context, userID string, from, through model.Time, metricName string) ([]string, error)
-	GetChunkFetcher(tm model.Time) *fetcher.Fetcher
+	GetChunkFetcher(tm model.Time) fetcher.Fetcher
 	SetChunkFilterer(chunkFilter chunk.RequestChunkFilterer)
 	Stats(ctx context.Context, userID string, from, through model.Time, matchers ...*labels.Matcher) (*stats.Stats, error)
 	Stop()
@@ -47,7 +47,7 @@ func NewCompositeStore(limits StoreLimits) *CompositeStore {
 	return &CompositeStore{compositeStore{}, limits}
 }
 
-func (c *CompositeStore) AddStore(start model.Time, fetcher *fetcher.Fetcher, index series.IndexStore, writer ChunkWriter, stop func()) {
+func (c *CompositeStore) AddStore(start model.Time, fetcher fetcher.Fetcher, index series.IndexStore, writer ChunkWriter, stop func()) {
 	c.stores = append(c.stores, compositeStoreEntry{
 		start: start,
 		Store: &storeEntry{

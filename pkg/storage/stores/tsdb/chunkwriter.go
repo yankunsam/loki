@@ -23,12 +23,12 @@ type IndexWriter interface {
 
 type ChunkWriter struct {
 	schemaCfg   config.SchemaConfig
-	fetcher     *fetcher.Fetcher
+	fetcher     fetcher.Fetcher
 	indexWriter IndexWriter
 }
 
 func NewChunkWriter(
-	fetcher *fetcher.Fetcher,
+	fetcher fetcher.Fetcher,
 	pd config.PeriodConfig,
 	indexWriter IndexWriter,
 ) *ChunkWriter {

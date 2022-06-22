@@ -51,10 +51,10 @@ type Writer struct {
 
 	indexWriter IndexWriter
 	schema      SchemaWrites
-	fetcher     *fetcher.Fetcher
+	fetcher     fetcher.Fetcher
 }
 
-func NewWriter(fetcher *fetcher.Fetcher, schemaCfg config.SchemaConfig, indexWriter IndexWriter, schema SchemaWrites, writeDedupeCache cache.Cache, disableIndexDeduplication bool) *Writer {
+func NewWriter(fetcher fetcher.Fetcher, schemaCfg config.SchemaConfig, indexWriter IndexWriter, schema SchemaWrites, writeDedupeCache cache.Cache, disableIndexDeduplication bool) *Writer {
 	return &Writer{
 		writeDedupeCache:          writeDedupeCache,
 		schemaCfg:                 schemaCfg,
