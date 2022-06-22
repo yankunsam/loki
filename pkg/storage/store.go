@@ -154,10 +154,11 @@ func (s *store) init() error {
 		if err != nil {
 			return err
 		}
-		f, err := fetcher.New(cache.CollectStats(s.chunksCache), s.storeCfg.ChunkCacheStubs(), s.schemaCfg, chunkClient, s.storeCfg.ChunkCacheConfig.AsyncCacheWriteBackConcurrency, s.storeCfg.ChunkCacheConfig.AsyncCacheWriteBackBufferSize)
-		if err != nil {
-			return err
-		}
+		// f, err := fetcher.New(cache.CollectStats(s.chunksCache), s.storeCfg.ChunkCacheStubs(), s.schemaCfg, chunkClient, s.storeCfg.ChunkCacheConfig.AsyncCacheWriteBackConcurrency, s.storeCfg.ChunkCacheConfig.AsyncCacheWriteBackBufferSize)
+		f := fetcher.NewGroupcache("chunks", "http://127.0.0.1:8081", []string{}, chunkClient)
+		// if err != nil {
+		// 	return err
+		// }
 
 		w, idx, stop, err := s.storeForPeriod(p, chunkClient, f)
 		if err != nil {
