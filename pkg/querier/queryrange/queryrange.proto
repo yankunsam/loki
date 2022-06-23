@@ -40,6 +40,7 @@ message LokiInstantRequest {
   logproto.Direction direction = 4;
   string path = 5;
   repeated string shards = 6 [(gogoproto.jsontag) = "shards"];
+  Options options = 7 [(gogoproto.nullable) = false];
 }
 
 message LokiResponse {
@@ -141,4 +142,8 @@ message IndexStatsResponse {
     (gogoproto.jsontag) = "-",
     (gogoproto.customtype) = "github.com/grafana/loki/pkg/querier/queryrange/queryrangebase.PrometheusResponseHeader"
   ];
+}
+
+message Options {
+  bool SplittingDisabled = 1;
 }

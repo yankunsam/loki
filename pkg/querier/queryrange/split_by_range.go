@@ -79,8 +79,14 @@ func (s *splitByRange) Do(ctx context.Context, request queryrangebase.Request) (
 		return nil, err
 	}
 
-	if _, ok := request.(*LokiInstantRequest); !ok {
+	instantRequest, ok := request.(*LokiInstantRequest)
+	if !ok {
 		return nil, fmt.Errorf("expected *LokiInstantRequest")
+	}
+
+	// If splitting is disabled continue to the next middleware
+	if instantRequest.GetOptions().SplittingDisabled {
+		return s.next.Do(ctx, request)
 	}
 
 	query := s.ng.Query(ctx, params, parsed)

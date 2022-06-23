@@ -37,6 +37,11 @@ var LokiCodec = &Codec{}
 
 type Codec struct{}
 
+const (
+	splittingDisabledHeader = "Splitting-Disabled"
+	disabledValue           = "true"
+)
+
 func (r *LokiRequest) GetEnd() int64 {
 	return r.EndTs.UnixNano() / (int64(time.Millisecond) / int64(time.Nanosecond))
 }
@@ -204,6 +209,15 @@ func (r *LokiLabelNamesRequest) LogToSpan(sp opentracing.Span) {
 
 func (*LokiLabelNamesRequest) GetCachingOptions() (res queryrangebase.CachingOptions) { return }
 
+func decodeOptions(r *http.Request) Options {
+	for _, value := range r.Header.Values(splittingDisabledHeader) {
+		if strings.Contains(value, disabledValue) {
+			return Options{SplittingDisabled: true}
+		}
+	}
+	return Options{SplittingDisabled: false}
+}
+
 func (Codec) DecodeRequest(_ context.Context, r *http.Request, forwardHeaders []string) (queryrangebase.Request, error) {
 	if err := r.ParseForm(); err != nil {
 		return nil, httpgrpc.Errorf(http.StatusBadRequest, err.Error())
@@ -238,6 +252,7 @@ func (Codec) DecodeRequest(_ context.Context, r *http.Request, forwardHeaders []
 			TimeTs:    req.Ts.UTC(),
 			Path:      r.URL.Path,
 			Shards:    req.Shards,
+			Options:   decodeOptions(r),
 		}, nil
 	case SeriesOp:
 		req, err := loghttp.ParseAndValidateSeriesQuery(r)
