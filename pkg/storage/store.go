@@ -155,7 +155,8 @@ func (s *store) init() error {
 			return err
 		}
 		// f, err := fetcher.New(cache.CollectStats(s.chunksCache), s.storeCfg.ChunkCacheStubs(), s.schemaCfg, chunkClient, s.storeCfg.ChunkCacheConfig.AsyncCacheWriteBackConcurrency, s.storeCfg.ChunkCacheConfig.AsyncCacheWriteBackBufferSize)
-		f := fetcher.NewGroupcache("chunks", "http://127.0.0.1:8081", []string{}, chunkClient)
+		group := cache.NewGroupcache(stats.ChunkCache, "", []string{""}, fetcher.FetchChunkObjectStore(chunkClient))
+		f := fetcher.NewReadThrough(s.logger, s.schemaCfg, group, chunkClient)
 		// if err != nil {
 		// 	return err
 		// }

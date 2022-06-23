@@ -87,6 +87,57 @@ func ParseExternalKey(userID, externalKey string) (Chunk, error) {
 	return parseNewExternalKey(userID, externalKey)
 }
 
+// TODO(kavi): This is just experimental.
+func ParseExternalKeyWithoutUserID(key string) (Chunk, error) {
+	userIdx := strings.Index(key, "/")
+	if userIdx == -1 || userIdx+1 >= len(key) {
+		return Chunk{}, errInvalidChunkID(key)
+	}
+	userID := key[:userIdx]
+
+	hexParts := key[userIdx+1:]
+	partsBytes := unsafeGetBytes(hexParts)
+	h0, i := readOneHexPart(partsBytes)
+	if i == 0 || i+1 >= len(partsBytes) {
+		return Chunk{}, errInvalidChunkID(key)
+	}
+	fingerprint, err := strconv.ParseUint(unsafeGetString(h0), 16, 64)
+	if err != nil {
+		return Chunk{}, err
+	}
+	partsBytes = partsBytes[i+1:]
+	h1, i := readOneHexPart(partsBytes)
+	if i == 0 || i+1 >= len(partsBytes) {
+		return Chunk{}, errInvalidChunkID(key)
+	}
+	from, err := strconv.ParseInt(unsafeGetString(h1), 16, 64)
+	if err != nil {
+		return Chunk{}, err
+	}
+	partsBytes = partsBytes[i+1:]
+	h2, i := readOneHexPart(partsBytes)
+	if i == 0 || i+1 >= len(partsBytes) {
+		return Chunk{}, errInvalidChunkID(key)
+	}
+	through, err := strconv.ParseInt(unsafeGetString(h2), 16, 64)
+	if err != nil {
+		return Chunk{}, err
+	}
+	checksum, err := strconv.ParseUint(unsafeGetString(partsBytes[i+1:]), 16, 32)
+	if err != nil {
+		return Chunk{}, err
+	}
+	return Chunk{
+		ChunkRef: logproto.ChunkRef{
+			UserID:      userID,
+			Fingerprint: fingerprint,
+			From:        model.Time(from),
+			Through:     model.Time(through),
+			Checksum:    uint32(checksum),
+		},
+	}, nil
+}
+
 // post-checksum
 func parseNewExternalKey(userID, key string) (Chunk, error) {
 	userIdx := strings.Index(key, "/")
