@@ -83,6 +83,35 @@ func TestFilteringPipeline(t *testing.T) {
 	}
 }
 
+func TestJsonPipelineAddsLabels(t *testing.T) {
+	lines := []string{
+		`{"level": "debug", "err_name": "ValidationError", "error_msg": "could not validate content"}`,
+		`{"level": "debug", "app": "nginx", "container": "nginx-bqLJaA4X", "method": "GET"}`,
+		`{"level": "debug", "err_msg": "invalid json"`,
+		`{"level": "debug", "app": "nginx"}`,
+	}
+
+	lbs := labels.Labels{{Name: "namespace", Value: "foo"}}
+
+	stages := []Stage{
+		mustFilter(NewFilter("debug", labels.MatchRegexp)).ToStage(),
+		NewJSONParser(),
+		NewStringLabelFilter(labels.MustNewMatcher(labels.MatchEqual, logqlmodel.ErrorLabel, "")),
+	}
+	p := NewPipeline(stages)
+
+	results := make([]labels.Labels, len(lines))
+	for i := range lines {
+		resLine, resLabels, matches := p.ForStream(lbs).ProcessString(int64(i*1000000000), lines[i])
+		t.Log("match", resLine)
+		if matches {
+			results[i] = resLabels.Labels()
+		}
+	}
+
+	require.Equal(t, []labels.Labels{}, results)
+}
+
 //nolint:unparam
 func newPipelineFilter(start, end int64, lbls labels.Labels, filter string) PipelineFilter {
 	var stages []Stage
