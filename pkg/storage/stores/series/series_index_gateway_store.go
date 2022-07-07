@@ -26,6 +26,7 @@ type IndexGatewayClientStore struct {
 }
 
 type IndexGatewayClient interface {
+	GetObjectRef(ctx context.Context, in *indexgatewaypb.GetObjectRefRequest, opts ...grpc.CallOption) (*indexgatewaypb.GetObjectRefResponse, error)
 	GetChunkRef(ctx context.Context, in *indexgatewaypb.GetChunkRefRequest, opts ...grpc.CallOption) (*indexgatewaypb.GetChunkRefResponse, error)
 	GetSeries(ctx context.Context, in *indexgatewaypb.GetSeriesRequest, opts ...grpc.CallOption) (*indexgatewaypb.GetSeriesResponse, error)
 	LabelNamesForMetricName(ctx context.Context, in *indexgatewaypb.LabelNamesForMetricNameRequest, opts ...grpc.CallOption) (*indexgatewaypb.LabelResponse, error)
@@ -38,6 +39,21 @@ func NewIndexGatewayClientStore(client IndexGatewayClient, fallbackStore IndexSt
 		client:        client,
 		fallbackStore: fallbackStore,
 	}
+}
+
+func (c *IndexGatewayClientStore) GetObjectRefs(ctx context.Context, userID string, from, through model.Time) ([]string, error) {
+	response, err := c.client.GetObjectRef(ctx, &indexgatewaypb.GetObjectRefRequest{
+		From:    from,
+		Through: through,
+	})
+	if err != nil {
+		if isUnimplementedCallError(err) && c.fallbackStore != nil {
+			// Handle communication with older index gateways gracefully, by falling back to the index store calls.
+			return c.fallbackStore.GetObjectRefs(ctx, userID, from, through)
+		}
+		return nil, err
+	}
+	return response.Refs, nil
 }
 
 func (c *IndexGatewayClientStore) GetChunkRefs(ctx context.Context, userID string, from, through model.Time, allMatchers ...*labels.Matcher) ([]logproto.ChunkRef, error) {

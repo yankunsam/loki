@@ -178,6 +178,21 @@ func (s *GatewayClient) QueryPages(ctx context.Context, queries []index.Query, c
 	})
 }
 
+func (s *GatewayClient) GetObjectRef(ctx context.Context, in *indexgatewaypb.GetObjectRefRequest, opts ...grpc.CallOption) (*indexgatewaypb.GetObjectRefResponse, error) {
+	if s.cfg.Mode == indexgateway.RingMode {
+		var (
+			resp *indexgatewaypb.GetObjectRefResponse
+			err  error
+		)
+		err = s.ringModeDo(ctx, func(client indexgatewaypb.IndexGatewayClient) error {
+			resp, err = client.GetObjectRef(ctx, in, opts...)
+			return err
+		})
+		return resp, err
+	}
+	return s.grpcClient.GetObjectRef(ctx, in, opts...)
+}
+
 func (s *GatewayClient) GetChunkRef(ctx context.Context, in *indexgatewaypb.GetChunkRefRequest, opts ...grpc.CallOption) (*indexgatewaypb.GetChunkRefResponse, error) {
 	if s.cfg.Mode == indexgateway.RingMode {
 		var (

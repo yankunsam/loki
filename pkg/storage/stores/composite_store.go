@@ -21,6 +21,7 @@ type Store interface {
 	// GetChunkRefs returns the un-loaded chunks and the fetchers to be used to load them. You can load each slice of chunks ([]Chunk),
 	// using the corresponding Fetcher (fetchers[i].FetchChunks(ctx, chunks[i], ...)
 	GetChunkRefs(ctx context.Context, userID string, from, through model.Time, matchers ...*labels.Matcher) ([][]chunk.Chunk, []*fetcher.Fetcher, error)
+	GetObjectRefs(ctx context.Context, userID string, from, through model.Time) ([]string, []*fetcher.Fetcher, error)
 	GetSeries(ctx context.Context, userID string, from, through model.Time, matchers ...*labels.Matcher) ([]labels.Labels, error)
 	LabelValuesForMetricName(ctx context.Context, userID string, from, through model.Time, metricName string, labelName string, matchers ...*labels.Matcher) ([]string, error)
 	LabelNamesForMetricName(ctx context.Context, userID string, from, through model.Time, metricName string) ([]string, error)
@@ -140,6 +141,27 @@ func (c compositeStore) LabelNamesForMetricName(ctx context.Context, userID stri
 		return nil
 	})
 	return result.Strings(), err
+}
+
+func (c compositeStore) GetObjectRefs(ctx context.Context, userID string, from, through model.Time) ([]string, []*fetcher.Fetcher, error) {
+	refs := make([]string, 0, 1e3)
+	fetchers := make([]*fetcher.Fetcher, 0, 1e3)
+	err := c.forStores(ctx, from, through, func(innerCtx context.Context, from, through model.Time, store Store) error {
+		ids, fetcher, err := store.GetObjectRefs(innerCtx, userID, from, through)
+		if err != nil {
+			return err
+		}
+
+		// Skip it if there are no objects.
+		if len(ids) == 0 {
+			return nil
+		}
+
+		refs = append(refs, ids...)
+		fetchers = append(fetchers, fetcher...)
+		return nil
+	})
+	return refs, fetchers, err
 }
 
 func (c compositeStore) GetChunkRefs(ctx context.Context, userID string, from, through model.Time, matchers ...*labels.Matcher) ([][]chunk.Chunk, []*fetcher.Fetcher, error) {

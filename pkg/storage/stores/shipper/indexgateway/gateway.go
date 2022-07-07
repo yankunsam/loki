@@ -2,7 +2,10 @@ package indexgateway
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
 	"sync"
+	"time"
 
 	"github.com/go-kit/log"
 	"github.com/grafana/dskit/services"
@@ -10,6 +13,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/weaveworks/common/user"
 
 	"github.com/grafana/loki/pkg/logproto"
 	"github.com/grafana/loki/pkg/logql/syntax"
@@ -27,6 +31,7 @@ const (
 
 type IndexQuerier interface {
 	GetChunkRefs(ctx context.Context, userID string, from, through model.Time, matchers ...*labels.Matcher) ([][]chunk.Chunk, []*fetcher.Fetcher, error)
+	GetObjectRefs(ctx context.Context, userID string, from, through model.Time) ([]string, []*fetcher.Fetcher, error)
 	GetSeries(ctx context.Context, userID string, from, through model.Time, matchers ...*labels.Matcher) ([]labels.Labels, error)
 	LabelValuesForMetricName(ctx context.Context, userID string, from, through model.Time, metricName string, labelName string, matchers ...*labels.Matcher) ([]string, error)
 	LabelNamesForMetricName(ctx context.Context, userID string, from, through model.Time, metricName string) ([]string, error)
@@ -47,8 +52,6 @@ type Gateway struct {
 
 	cfg Config
 	log log.Logger
-
-	shipper IndexQuerier
 }
 
 // NewIndexGateway instantiates a new Index Gateway and start its services.
@@ -70,6 +73,20 @@ func NewIndexGateway(cfg Config, log log.Logger, registerer prometheus.Registere
 	})
 
 	return g, nil
+}
+
+func (g *Gateway) HandleGetObjects(w http.ResponseWriter, r *http.Request) {
+	_, ctx, _ := user.ExtractOrgIDFromHTTPRequest(r)
+	req := indexgatewaypb.GetObjectRefRequest{
+		From:    model.Now().Add(-7 * 24 * time.Hour),
+		Through: model.Now(),
+	}
+	res, err := g.GetObjectRef(ctx, &req)
+	if err != nil {
+		w.Write([]byte(err.Error()))
+	} else {
+		json.NewEncoder(w).Encode(res)
+	}
 }
 
 func (g *Gateway) QueryIndex(request *indexgatewaypb.QueryIndexRequest, server indexgatewaypb.IndexGateway_QueryIndexServer) error {
@@ -144,6 +161,18 @@ func buildResponses(query index.Query, batch index.ReadBatchResult, callback fun
 	}
 
 	return nil
+}
+
+func (g *Gateway) GetObjectRef(ctx context.Context, req *indexgatewaypb.GetObjectRefRequest) (*indexgatewaypb.GetObjectRefResponse, error) {
+	instanceID, err := tenant.TenantID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	refs, _, err := g.indexQuerier.GetObjectRefs(ctx, instanceID, req.From, req.Through)
+	if err != nil {
+		return nil, err
+	}
+	return &indexgatewaypb.GetObjectRefResponse{Refs: refs}, nil
 }
 
 func (g *Gateway) GetChunkRef(ctx context.Context, req *indexgatewaypb.GetChunkRefRequest) (*indexgatewaypb.GetChunkRefResponse, error) {

@@ -44,6 +44,24 @@ type storeEntry struct {
 	ChunkWriter
 }
 
+func (c *storeEntry) GetObjectRefs(ctx context.Context, userID string, from, through model.Time) ([]string, []*fetcher.Fetcher, error) {
+	if ctx.Err() != nil {
+		return nil, nil, ctx.Err()
+	}
+	log, ctx := spanlogger.New(ctx, "GetObjectRefs")
+	defer log.Span.Finish()
+
+	shortcut, err := c.validateQueryTimeRange(ctx, userID, &from, &through)
+	if err != nil {
+		return nil, nil, err
+	} else if shortcut {
+		return nil, nil, nil
+	}
+
+	refs, err := c.index.GetObjectRefs(ctx, userID, from, through)
+	return refs, []*fetcher.Fetcher{c.fetcher}, err
+}
+
 func (c *storeEntry) GetChunkRefs(ctx context.Context, userID string, from, through model.Time, allMatchers ...*labels.Matcher) ([][]chunk.Chunk, []*fetcher.Fetcher, error) {
 	if ctx.Err() != nil {
 		return nil, nil, ctx.Err()

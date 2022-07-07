@@ -48,6 +48,10 @@ func NewAsyncStore(cfg AsyncStoreCfg, store stores.Store, scfg config.SchemaConf
 	}
 }
 
+func (a *AsyncStore) GetObjectRefs(ctx context.Context, userID string, from, through model.Time) ([]string, []*fetcher.Fetcher, error) {
+	return a.Store.GetObjectRefs(ctx, userID, from, through)
+}
+
 func (a *AsyncStore) GetChunkRefs(ctx context.Context, userID string, from, through model.Time, matchers ...*labels.Matcher) ([][]chunk.Chunk, []*fetcher.Fetcher, error) {
 	spanLogger := spanlogger.FromContext(ctx)
 

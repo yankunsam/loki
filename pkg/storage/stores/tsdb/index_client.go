@@ -62,6 +62,10 @@ func cleanMatchers(matchers ...*labels.Matcher) ([]*labels.Matcher, *index.Shard
 
 }
 
+func (c *IndexClient) GetObjectRefs(ctx context.Context, userID string, from, through model.Time) ([]string, error) {
+	return make([]string, 0), nil
+}
+
 // TODO(owen-d): synchronize logproto.ChunkRef and tsdb.ChunkRef so we don't have to convert.
 // They share almost the same fields, so we can add the missing `KB` field to the proto and then
 // use that within the tsdb package.

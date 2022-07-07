@@ -61,6 +61,7 @@ type chunkFetcher interface {
 
 type IndexStore interface {
 	GetChunkRefs(ctx context.Context, userID string, from, through model.Time, matchers ...*labels.Matcher) ([]logproto.ChunkRef, error)
+	GetObjectRefs(ctx context.Context, userID string, from, through model.Time) ([]string, error)
 	GetSeries(ctx context.Context, userID string, from, through model.Time, matchers ...*labels.Matcher) ([]labels.Labels, error)
 	LabelValuesForMetricName(ctx context.Context, userID string, from, through model.Time, metricName string, labelName string, matchers ...*labels.Matcher) ([]string, error)
 	LabelNamesForMetricName(ctx context.Context, userID string, from, through model.Time, metricName string) ([]string, error)
@@ -88,6 +89,26 @@ func NewIndexStore(schemaCfg config.SchemaConfig, schema index.SeriesStoreSchema
 		fetcher:        fetcher,
 		chunkBatchSize: chunkBatchSize,
 	}
+}
+
+func (c *indexStore) GetObjectRefs(ctx context.Context, userID string, from, through model.Time) ([]string, error) {
+	log := util_log.WithContext(ctx, util_log.Logger)
+	seriesIDs, err := c.lookupSeriesByMetricNameMatcher(ctx, from, through, userID, "logs", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	if len(seriesIDs) == 0 {
+		return make([]string, 0), nil
+	}
+
+	// Lookup the series in the index to get the chunks.
+	chunkIDs, err := c.lookupChunksBySeries(ctx, from, through, userID, seriesIDs)
+	if err != nil {
+		level.Error(log).Log("msg", "lookup chunks by series failed", "err", err)
+		return nil, err
+	}
+
+	return chunkIDs, err
 }
 
 func (c *indexStore) GetChunkRefs(ctx context.Context, userID string, from, through model.Time, allMatchers ...*labels.Matcher) ([]logproto.ChunkRef, error) {
@@ -419,6 +440,7 @@ func (c *indexStore) lookupIdsByMetricNameMatcher(ctx context.Context, from, thr
 	} else if matcher.Type == labels.MatchEqual {
 		labelName = matcher.Name
 		queries, err = c.schema.GetReadQueriesForMetricLabelValue(from, through, userID, metricName, matcher.Name, matcher.Value)
+		level.Info(util_log.Logger).Log("queries", queries)
 	} else {
 		labelName = matcher.Name
 		queries, err = c.schema.GetReadQueriesForMetricLabel(from, through, userID, metricName, matcher.Name)

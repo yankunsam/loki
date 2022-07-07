@@ -962,6 +962,10 @@ func (t *Loki) initIndexGateway() (services.Service, error) {
 	}
 
 	indexgatewaypb.RegisterIndexGatewayServer(t.Server.GRPC, gateway)
+
+	t.Server.HTTP.Methods("GET").Path("/loki/api/v1/objects").Handler(
+		http.HandlerFunc(gateway.HandleGetObjects),
+	)
 	return gateway, nil
 }
 
