@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"strconv"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -41,7 +42,7 @@ type TCPTransportConfig struct {
 	BindAddrs flagext.StringSlice `yaml:"bind_addr"`
 
 	// BindPort is the port to listen on, for each address above.
-	BindPort int `yaml:"bind_port"`
+	BindPort flagext.StringSliceCSV `yaml:"bind_port"`
 
 	// Timeout used when making connections to other nodes to send packet.
 	// Zero = no timeout
@@ -69,13 +70,15 @@ func (cfg *TCPTransportConfig) RegisterFlags(f *flag.FlagSet) {
 func (cfg *TCPTransportConfig) RegisterFlagsWithPrefix(f *flag.FlagSet, prefix string) {
 	// "Defaults to hostname" -- memberlist sets it to hostname by default.
 	f.Var(&cfg.BindAddrs, prefix+"memberlist.bind-addr", "IP address to listen on for gossip messages. Multiple addresses may be specified. Defaults to 0.0.0.0")
-	f.IntVar(&cfg.BindPort, prefix+"memberlist.bind-port", 7946, "Port to listen on for gossip messages.")
+	f.Var(&cfg.BindPort, prefix+"memberlist.bind-port", "Port to listen on for gossip messages.")
 	f.DurationVar(&cfg.PacketDialTimeout, prefix+"memberlist.packet-dial-timeout", 5*time.Second, "Timeout used when connecting to other nodes to send packet.")
 	f.DurationVar(&cfg.PacketWriteTimeout, prefix+"memberlist.packet-write-timeout", 5*time.Second, "Timeout for writing 'packet' data.")
 	f.BoolVar(&cfg.TransportDebug, prefix+"memberlist.transport-debug", false, "Log debug transport messages. Note: global log.level must be at debug level as well.")
 
 	f.BoolVar(&cfg.TLSEnabled, prefix+"memberlist.tls-enabled", false, "Enable TLS on the memberlist transport layer.")
 	cfg.TLS.RegisterFlagsWithPrefix(prefix+"memberlist", f)
+
+	cfg.BindPort = []string{"7946"}
 }
 
 // TCPTransport is a memberlist.Transport implementation that uses TCP for both packet and stream
@@ -143,32 +146,35 @@ func NewTCPTransport(config TCPTransportConfig, logger log.Logger) (*TCPTranspor
 	}()
 
 	// Build all the TCP and UDP listeners.
-	port := config.BindPort
-	for _, addr := range config.BindAddrs {
-		ip := net.ParseIP(addr)
+	for _, p := range config.BindPort {
+		port, _ := strconv.Atoi(p)
 
-		tcpAddr := &net.TCPAddr{IP: ip, Port: port}
+		for _, addr := range config.BindAddrs {
+			ip := net.ParseIP(addr)
 
-		var tcpLn net.Listener
-		if config.TLSEnabled {
-			tcpLn, err = tls.Listen("tcp", tcpAddr.String(), t.tlsConfig)
-			if err != nil {
-				return nil, errors.Wrapf(err, "failed to start TLS TCP listener on %q port %d", addr, port)
+			tcpAddr := &net.TCPAddr{IP: ip, Port: port}
+
+			var tcpLn net.Listener
+			if config.TLSEnabled {
+				tcpLn, err = tls.Listen("tcp", tcpAddr.String(), t.tlsConfig)
+				if err != nil {
+					return nil, errors.Wrapf(err, "failed to start TLS TCP listener on %q port %d", addr, port)
+				}
+			} else {
+				tcpLn, err = net.ListenTCP("tcp", tcpAddr)
+				if err != nil {
+					return nil, errors.Wrapf(err, "failed to start TCP listener on %q port %d", addr, port)
+				}
 			}
-		} else {
-			tcpLn, err = net.ListenTCP("tcp", tcpAddr)
-			if err != nil {
-				return nil, errors.Wrapf(err, "failed to start TCP listener on %q port %d", addr, port)
+
+			t.tcpListeners = append(t.tcpListeners, tcpLn)
+
+			// If the config port given was zero, use the first TCP listener
+			// to pick an available port and then apply that to everything
+			// else.
+			if port == 0 {
+				port = tcpLn.Addr().(*net.TCPAddr).Port
 			}
-		}
-
-		t.tcpListeners = append(t.tcpListeners, tcpLn)
-
-		// If the config port given was zero, use the first TCP listener
-		// to pick an available port and then apply that to everything
-		// else.
-		if port == 0 {
-			port = tcpLn.Addr().(*net.TCPAddr).Port
 		}
 	}
 
