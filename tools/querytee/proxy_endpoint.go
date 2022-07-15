@@ -106,7 +106,7 @@ func newHTTPProxy(name string, url *url.URL) *httputil.ReverseProxy {
 	return &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
 			// ctx := req.Context()
-			// req.URL.Scheme = url.Scheme
+			req.URL.Scheme = url.Scheme
 			req.URL.Host = url.Host
 			// if span := opentracing.SpanFromContext(ctx); span != nil {
 			// 	newReq, _ := nethttp.TraceRequest(span.Tracer(), req)
