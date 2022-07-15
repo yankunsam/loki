@@ -51,6 +51,7 @@ type Route struct {
 	RouteName          string
 	Methods            []string
 	ResponseComparator ResponsesComparator
+	WebSockets         bool
 }
 
 type Proxy struct {
@@ -165,7 +166,7 @@ func (p *Proxy) Start() error {
 		if p.cfg.CompareResponses {
 			comparator = route.ResponseComparator
 		}
-		router.Path(route.Path).Methods(route.Methods...).Handler(NewProxyEndpoint(p.backends, route.RouteName, p.metrics, p.logger, comparator))
+		router.Path(route.Path).Methods(route.Methods...).Handler(NewProxyEndpoint(p.backends, route.RouteName, p.metrics, p.logger, comparator, route.WebSockets))
 	}
 
 	if p.cfg.PassThroughNonRegisteredRoutes {

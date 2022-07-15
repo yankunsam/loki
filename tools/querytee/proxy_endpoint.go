@@ -6,14 +6,16 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-
 	util_log "github.com/grafana/loki/pkg/util/log"
+	"github.com/weaveworks/common/user"
 )
 
 type ResponsesComparator interface {
@@ -31,9 +33,12 @@ type ProxyEndpoint struct {
 
 	// The route name used to track metrics.
 	routeName string
+
+	// Whether to use websockets
+	useWebsockets bool
 }
 
-func NewProxyEndpoint(backends []*ProxyBackend, routeName string, metrics *ProxyMetrics, logger log.Logger, comparator ResponsesComparator) *ProxyEndpoint {
+func NewProxyEndpoint(backends []*ProxyBackend, routeName string, metrics *ProxyMetrics, logger log.Logger, comparator ResponsesComparator, useWebsockets bool) *ProxyEndpoint {
 	hasPreferredBackend := false
 	for _, backend := range backends {
 		if backend.preferred {
@@ -49,12 +54,19 @@ func NewProxyEndpoint(backends []*ProxyBackend, routeName string, metrics *Proxy
 		logger:              logger,
 		comparator:          comparator,
 		hasPreferredBackend: hasPreferredBackend,
+		useWebsockets:       useWebsockets,
 	}
 }
 
 func (p *ProxyEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Send the same request to all backends.
 	resCh := make(chan *backendResponse, len(p.backends))
+
+	if p.useWebsockets {
+		p.executeBackendRequestsWebSockets(w, r)
+		return
+	}
+
 	go p.executeBackendRequests(r, resCh)
 
 	// Wait for the first response that's feasible to be sent back to the client.
@@ -70,6 +82,79 @@ func (p *ProxyEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p.metrics.responsesTotal.WithLabelValues(downstreamRes.backend.name, r.Method, p.routeName).Inc()
+}
+
+func newHTTPProxy(name string, url *url.URL) *httputil.ReverseProxy {
+	// transport := &http.Transport{
+	// 	Proxy: http.ProxyFromEnvironment,
+	// 	DialContext: conntrack.NewDialContextFunc(
+	// 		conntrack.DialWithTracing(),
+	// 		conntrack.DialWithName(name),
+	// 		conntrack.DialWithDialer(&net.Dialer{
+	// 			Timeout:   30 * time.Second,
+	// 			KeepAlive: 30 * time.Second,
+	// 		}),
+	// 	),
+	// 	MaxIdleConns:          10000,
+	// 	MaxIdleConnsPerHost:   1000, // see https://github.com/golang/go/issues/13801
+	// 	IdleConnTimeout:       90 * time.Second,
+	// 	TLSHandshakeTimeout:   10 * time.Second,
+	// 	ExpectContinueTimeout: 1 * time.Second,
+	// }
+
+	// Separate Proxy for Writes with added buffer pool
+	return &httputil.ReverseProxy{
+		Director: func(req *http.Request) {
+			// ctx := req.Context()
+			req.URL.Scheme = url.Scheme
+			req.URL.Host = url.Host
+			// if span := opentracing.SpanFromContext(ctx); span != nil {
+			// 	newReq, _ := nethttp.TraceRequest(span.Tracer(), req)
+			// 	*req = *newReq
+			// }
+		},
+		// ModifyResponse: func(r *http.Response) error {
+		// 	// NOTE: this is called _before_ we read the response body, which
+		// 	// results in the child span being finished _after_ this one.
+		// 	// Ideally we'd have a hook into that but I can't seem to find one.
+		// 	if ht := nethttp.TracerFromRequest(r.Request); ht != nil {
+		// 		ht.Finish()
+		// 	}
+		// 	return nil
+		// },
+		// Transport: &nethttp.Transport{RoundTripper: transport},
+	}
+}
+
+func (p *ProxyEndpoint) executeBackendRequestsWebSockets(w http.ResponseWriter, r *http.Request) {
+	preferredBackendIdx := -1
+	for i, backend := range p.backends {
+		if backend.preferred {
+			preferredBackendIdx = i
+			break
+		}
+	}
+
+	if preferredBackendIdx < 0 {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	backend := p.backends[preferredBackendIdx]
+	proxy := newHTTPProxy("loki_api_v1_tail", backend.endpoint)
+
+	propagateUser := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, ctx, err := user.ExtractOrgIDFromHTTPRequest(r)
+			if err != nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+
+	propagateUser(proxy.ServeHTTP)(w, r)
 }
 
 func (p *ProxyEndpoint) executeBackendRequests(r *http.Request, resCh chan *backendResponse) {
@@ -131,7 +216,7 @@ func (p *ProxyEndpoint) executeBackendRequests(r *http.Request, resCh chan *back
 				lvl = level.Warn
 			}
 
-			lvl(p.logger).Log("msg", "Backend response", "path", r.URL.Path, "query", query, "backend", b.name, "status", status, "elapsed", elapsed)
+			lvl(p.logger).Log("msg", "Backend response", "path", r.URL.Path, "query", query, "backend", b.name, "status", status, "elapsed", elapsed, "body", string(body))
 			p.metrics.requestDuration.WithLabelValues(res.backend.name, r.Method, p.routeName, strconv.Itoa(res.statusCode())).Observe(elapsed.Seconds())
 
 			// Keep track of the response if required.
