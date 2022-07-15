@@ -6,13 +6,14 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"path"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-
+	"github.com/gorilla/websocket"
 	util_log "github.com/grafana/loki/pkg/util/log"
 )
 
@@ -31,9 +32,12 @@ type ProxyEndpoint struct {
 
 	// The route name used to track metrics.
 	routeName string
+
+	// Whether to use websockets
+	useWebsockets bool
 }
 
-func NewProxyEndpoint(backends []*ProxyBackend, routeName string, metrics *ProxyMetrics, logger log.Logger, comparator ResponsesComparator) *ProxyEndpoint {
+func NewProxyEndpoint(backends []*ProxyBackend, routeName string, metrics *ProxyMetrics, logger log.Logger, comparator ResponsesComparator, useWebsockets bool) *ProxyEndpoint {
 	hasPreferredBackend := false
 	for _, backend := range backends {
 		if backend.preferred {
@@ -49,12 +53,19 @@ func NewProxyEndpoint(backends []*ProxyBackend, routeName string, metrics *Proxy
 		logger:              logger,
 		comparator:          comparator,
 		hasPreferredBackend: hasPreferredBackend,
+		useWebsockets:       useWebsockets,
 	}
 }
 
 func (p *ProxyEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Send the same request to all backends.
 	resCh := make(chan *backendResponse, len(p.backends))
+
+	if p.useWebsockets {
+		p.executeBackendRequestsWebSockets(w, r)
+		return
+	}
+
 	go p.executeBackendRequests(r, resCh)
 
 	// Wait for the first response that's feasible to be sent back to the client.
@@ -70,6 +81,137 @@ func (p *ProxyEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p.metrics.responsesTotal.WithLabelValues(downstreamRes.backend.name, r.Method, p.routeName).Inc()
+}
+
+func (p *ProxyEndpoint) executeBackendRequestsWebSockets(w http.ResponseWriter, r *http.Request) {
+	upgrader := websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+	}
+
+	level.Debug(p.logger).Log("msg", "Received websocket request", "path", r.URL.Path, "query", r.URL.RawQuery)
+
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		level.Error(p.logger).Log("msg", "Unable to upgrade websocket connection", "err", err)
+		return
+	}
+
+	level.Debug(p.logger).Log("msg", "Websocket connection upgraded", "path", r.URL.Path, "query", r.URL.RawQuery)
+
+	// Setup websockets on all backends
+	backendConnections := make([]*websocket.Conn, len(p.backends), len(p.backends))
+	for i, backend := range p.backends {
+		// TODO: Maybe it makes sense to have a Proxy interface and then spezialize an HTTP and a Websockets proxy
+		url := *r.URL
+		url.Host = backend.endpoint.Host
+		url.Scheme = "ws"
+		url.Path = path.Join(backend.endpoint.Path, r.URL.Path)
+		url.RawQuery = r.URL.RawQuery
+
+		level.Debug(p.logger).Log("Dialing backend", "url", url.String())
+
+		backendConn, _, err := websocket.DefaultDialer.Dial(url.String(), nil)
+		if err != nil {
+			level.Error(p.logger).Log("msg", "Unable to setup websocket", "backend", backend.name, "err", err)
+			continue
+		}
+
+		backendConnections[i] = backendConn
+	}
+
+	level.Debug(p.logger).Log("msg", "Dialed to all backends", "path", r.URL.Path, "query", r.URL.RawQuery)
+
+	// A working group for reads and writes
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+
+	// Read Messages from client and forward them to backends
+	go func() {
+		defer wg.Done()
+
+		for {
+			level.Debug(p.logger).Log("msg", "Waiting for message from client")
+
+			msgType, msg, err := conn.ReadMessage()
+			if err != nil {
+				level.Error(p.logger).Log("msg", "Unable to read websocket msg from client", "err", err)
+				break
+			}
+
+			level.Debug(p.logger).Log("msg", "Received websocket msg from client", "msgType", msgType, "msg", string(msg))
+
+			// TODO: Make this aync
+			for i, backend := range p.backends {
+				backendConn := backendConnections[i]
+				if backendConn == nil {
+					level.Warn(p.logger).Log("msg", "Backend websocket connection is nil. Skipping.", "backend", backend.name)
+					continue
+				}
+
+				level.Debug(p.logger).Log("msg", "Forwarding message to backend", "backend", backend.name, "msgType", msgType, "msg", string(msg))
+
+				if err := backendConn.WriteMessage(msgType, msg); err != nil {
+					level.Error(p.logger).Log("msg", "Unable to write message", "err", err)
+					break
+				}
+
+				level.Debug(p.logger).Log("msg", "Message forwarded to backend", "backend", backend.name, "msgType", msgType, "msg", string(msg))
+			}
+
+			level.Debug(p.logger).Log("msg", "Sent websocket msg to backends", "msgType", msgType, "msg", string(msg))
+		}
+	}()
+
+	// Read from preferred backend and forward to client
+	// TODO: If there is no preferred, use first backend to answer.
+	// TODO: Read from all the backends async
+	go func() {
+		defer wg.Done()
+
+		// Look for the preferred backend othersise use the first one
+		preferredBackendIdx := 0
+		for i, backend := range p.backends {
+			if backend.preferred {
+				preferredBackendIdx = i
+			}
+		}
+
+		for {
+			backendConn := backendConnections[preferredBackendIdx]
+			if backendConn == nil {
+				level.Warn(p.logger).Log("msg", "Backend websocket connection is nil. Skipping.", "backend", p.backends[preferredBackendIdx].name)
+				break
+			}
+
+			level.Debug(p.logger).Log("msg", "Waiting for message from backend", "backend", p.backends[preferredBackendIdx].name)
+
+			msgType, msg, err := backendConn.ReadMessage()
+			if err != nil {
+				level.Error(p.logger).Log("msg", "Unable to read message from backend", "err", err)
+				break
+			}
+
+			level.Debug(p.logger).Log("msg", "Received websocket msg from backend", "msgType", msgType, "msg", string(msg))
+
+			if err := conn.WriteMessage(msgType, msg); err != nil {
+				level.Error(p.logger).Log("msg", "Unable to write message back to client", "err", err)
+				break
+			}
+
+			level.Debug(p.logger).Log("msg", "Message forwarded to client", "msgType", msgType, "msg", string(msg))
+		}
+	}()
+
+	// Wait for both reads and writes to finish
+	wg.Wait()
+	for i, backendConn := range backendConnections {
+		if backendConn != nil {
+			if err := backendConn.Close(); err != nil {
+				level.Error(p.logger).Log("msg", "Unable to close websocket connection", "err", err, "backend", p.backends[i].name)
+			}
+		}
+	}
 }
 
 func (p *ProxyEndpoint) executeBackendRequests(r *http.Request, resCh chan *backendResponse) {
@@ -131,7 +273,7 @@ func (p *ProxyEndpoint) executeBackendRequests(r *http.Request, resCh chan *back
 				lvl = level.Warn
 			}
 
-			lvl(p.logger).Log("msg", "Backend response", "path", r.URL.Path, "query", query, "backend", b.name, "status", status, "elapsed", elapsed)
+			lvl(p.logger).Log("msg", "Backend response", "path", r.URL.Path, "query", query, "backend", b.name, "status", status, "elapsed", elapsed, "body", string(body))
 			p.metrics.requestDuration.WithLabelValues(res.backend.name, r.Method, p.routeName, strconv.Itoa(res.statusCode())).Observe(elapsed.Seconds())
 
 			// Keep track of the response if required.
