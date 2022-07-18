@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"math/rand"
 	"net"
 	"net/http"
 	"strings"
@@ -46,6 +47,8 @@ type GroupCache struct {
 	reg                  prometheus.Registerer
 	startWaitingForClose context.CancelFunc
 	capacity             int64
+	restrict             bool
+	self                 string
 }
 
 // RingCfg is a wrapper for the Groupcache ring configuration plus the replication factor.
@@ -57,6 +60,7 @@ type GroupCacheConfig struct {
 	Enabled    bool    `yaml:"enabled,omitempty"`
 	Ring       RingCfg `yaml:"ring,omitempty"`
 	CapacityMB int64   `yaml:"capacity_per_cache_mb,omitempty"`
+	Restrict   bool    `yaml:"restrict,omitempty"`
 
 	Cache Cache `yaml:"-"`
 }
@@ -79,7 +83,24 @@ func NewGroupCache(rm ringManager, config GroupCacheConfig, server *server.Serve
 	addr := fmt.Sprintf("http://%s", rm.Addr())
 	level.Info(logger).Log("msg", "groupcache local address set to", "addr", addr)
 
-	pool := groupcache.NewHTTPPoolOpts(addr, &groupcache.HTTPPoolOptions{Transport: http2Transport})
+	hash := make(map[string]int)
+
+	pool := groupcache.NewHTTPPoolOpts(addr, &groupcache.HTTPPoolOptions{
+		Transport: http2Transport,
+		Replicas:  1,
+		HashFn: func(data []byte) uint64 {
+
+			if !strings.Contains(string(data), "http") {
+				return uint64(rand.Intn(len(hash)))
+			}
+
+			if _, ok := hash[string(data)]; !ok {
+				hash[string(data)] = len(hash)
+			}
+
+			return uint64(len(hash))
+		}},
+	)
 	server.HTTP.PathPrefix("/_groupcache/").Handler(pool)
 
 	startCtx, cancel := context.WithCancel(context.Background())
@@ -88,11 +109,13 @@ func NewGroupCache(rm ringManager, config GroupCacheConfig, server *server.Serve
 		pool:                 pool,
 		logger:               logger,
 		stopChan:             make(chan struct{}),
-		updateInterval:       5 * time.Minute,
+		updateInterval:       5 * time.Second,
+		self:                 addr,
 		wg:                   sync.WaitGroup{},
 		startWaitingForClose: cancel,
 		reg:                  reg,
 		capacity:             config.CapacityMB * 1e6, // MB => B
+		restrict:             config.Restrict,
 	}
 
 	go func() {
@@ -141,8 +164,15 @@ func (c *GroupCache) peerUrls() ([]string, error) {
 
 	var addrs []string
 	for _, i := range replicationSet.Instances {
-		addrs = append(addrs, fmt.Sprintf("http://%s", i.Addr))
+		pieces := strings.Split(i.Addr, ":")
+
+		if pieces[1] == "9999" {
+			addrs = append(addrs, fmt.Sprintf("http://%s:3100", pieces[0]))
+		}
 	}
+
+	addrs = append(addrs, c.self)
+	fmt.Printf("found peers: %+v\n", addrs)
 	return addrs, nil
 }
 
@@ -229,7 +259,7 @@ func (c *group) Store(ctx context.Context, keys []string, values [][]byte) error
 
 	var lastErr error
 	for i, key := range keys {
-		if err := c.cache.Set(ctx, key, values[i], time.Time{}, true); err != nil {
+		if err := c.cache.Set(ctx, key, values[i], time.Time{}, false); err != nil {
 			level.Warn(c.logger).Log("msg", "failed to put to groupcache", "err", err)
 			lastErr = err
 		}

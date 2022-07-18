@@ -9,7 +9,7 @@ services:
   # Loki would not have permissions to create the directories.
   # Therefore the init container changes permissions of the mounted directory.
   init:
-    image: grafana/loki:2.6.0
+    image: grafana/loki:dannykopping-groupcache-target-7446f24-WIP-debug
     user: root
     entrypoint:
       - "chown"
@@ -51,8 +51,8 @@ services:
     command:
       - --loop
       - --format=json
-      - --number=10    # number of log lines to generate per second
-      - --delay=100ms  # delay between log lines
+      - --number=10000    # number of log lines to generate per second
+      - --delay=1ms  # delay between log lines
       - --output=/var/log/generated-logs.txt
       - --overwrite
       - --type=log
@@ -102,11 +102,11 @@ services:
       - loki
 
   loki-frontend:
-    image: grafana/loki:2.6.0
+    image: grafana/loki:dannykopping-groupcache-target-7446f24-WIP-debug
     volumes:
-        - ./config:/etc/loki/
+      - ./config:/etc/loki/
     ports:
-        - "3100"
+      - "3100"
     command: "-config.file=/etc/loki/loki.yaml -target=query-frontend -frontend.downstream-url=http://loki-read:3100"
     networks:
       - loki
@@ -114,15 +114,51 @@ services:
       mode: replicated
       replicas: 2
 
+  loki-cache1:
+    image: grafana/loki:dannykopping-groupcache-target-7446f24-WIP-debug
+    volumes:
+      - ./config:/etc/loki/
+    ports:
+      - "30000-30002:3100"
+      - "7946"
+      - "35000:40000"
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - apparmor=unconfined
+    command: "-config.file=/etc/loki/loki.yaml -target=cache"
+    networks:
+      - loki
+    restart: always
+    # only needed for interactive debugging with dlv
+
+#  loki-cache2:
+#    image: grafana/loki:dannykopping-groupcache-target-7446f24-WIP-debug
+#    volumes:
+#      - ./config:/etc/loki/
+#    ports:
+#      - "30001:3100"
+#      - "7946"
+#      - "35001:40000"
+#    cap_add:
+#      - SYS_PTRACE
+#    security_opt:
+#      - apparmor=unconfined
+#    command: "-config.file=/etc/loki/loki.yaml -target=cache"
+#    networks:
+#      - loki
+#    restart: always
+#    # only needed for interactive debugging with dlv
+
   loki-read:
-    image: grafana/loki:2.6.0
+    image: grafana/loki:dannykopping-groupcache-target-7446f24-WIP-debug
     volumes:
       - ./config:/etc/loki/
     ports:
       - "3100"
       - "7946"
 
-    # uncomment to use interactive debugging
+      # uncomment to use interactive debugging
       # - "40000-40002:40000" # # makes the replicas available on ports 40000, 40001, 40002
     #cap_add:
     #  - SYS_PTRACE
@@ -138,19 +174,19 @@ services:
     # only needed for interactive debugging with dlv
 
   loki-write:
-    image: grafana/loki:2.6.0
+    image: grafana/loki:dannykopping-groupcache-target-7446f24-WIP-debug
     volumes:
       - ./config:/etc/loki/
     ports:
       - "3100"
       - "7946"
 
-    # uncomment to use interactive debugging
-      # - "50000-50002:40000" # makes the replicas available on ports 50000, 50001, 50002
-    # cap_add:
-    #   - SYS_PTRACE
-    # security_opt:
-    #   - apparmor=unconfined
+      # uncomment to use interactive debugging
+      - "50000-50002:40000" # makes the replicas available on ports 50000, 50001, 50002
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - apparmor=unconfined
     command: "-config.file=/etc/loki/loki.yaml -target=write"
     networks:
       - loki

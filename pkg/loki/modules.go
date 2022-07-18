@@ -100,6 +100,7 @@ const (
 	All                      string = "all"
 	Read                     string = "read"
 	Write                    string = "write"
+	Cache                    string = "cache"
 	UsageReport              string = "usage-report"
 )
 
@@ -166,7 +167,12 @@ func (t *Loki) initGroupcache() (_ services.Service, err error) {
 		return nil, nil
 	}
 
-	t.Cfg.Common.GroupCacheConfig.Ring.ListenPort = t.Cfg.Server.HTTPListenPort
+	if t.Cfg.isModuleEnabled(Cache) {
+		t.Cfg.Common.GroupCacheConfig.Ring.ListenPort = 9999
+	} else {
+		t.Cfg.Common.GroupCacheConfig.Ring.ListenPort = t.Cfg.Server.HTTPListenPort
+	}
+
 	rm, err := cache.NewGroupcacheRingManager(t.Cfg.Common.GroupCacheConfig, util_log.Logger, prometheus.DefaultRegisterer)
 	if err != nil {
 		return nil, gerrors.Wrap(err, "new index gateway ring manager")

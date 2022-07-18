@@ -18,10 +18,7 @@ limitations under the License.
 package consistenthash
 
 import (
-	"crypto/md5"
-	"fmt"
 	"sort"
-	"strconv"
 
 	"github.com/segmentio/fasthash/fnv1"
 )
@@ -56,7 +53,7 @@ func (m *Map) IsEmpty() bool {
 func (m *Map) Add(keys ...string) {
 	for _, key := range keys {
 		for i := 0; i < m.replicas; i++ {
-			hash := int(m.hash([]byte(fmt.Sprintf("%x", md5.Sum([]byte(strconv.Itoa(i)+key))))))
+			hash := int(m.hash([]byte(key)))
 			m.keys = append(m.keys, hash)
 			m.hashMap[hash] = key
 		}

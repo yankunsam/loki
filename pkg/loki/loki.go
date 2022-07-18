@@ -500,6 +500,7 @@ func (t *Loki) setupModuleManager() error {
 	mm.RegisterModule(All, nil)
 	mm.RegisterModule(Read, nil)
 	mm.RegisterModule(Write, nil)
+	mm.RegisterModule(Cache, nil)
 
 	// Add dependencies
 	deps := map[string][]string{
@@ -525,6 +526,7 @@ func (t *Loki) setupModuleManager() error {
 		All:                      {QueryScheduler, QueryFrontend, Querier, Ingester, Distributor, Ruler, Compactor},
 		Read:                     {QueryScheduler, QueryFrontend, Querier, Ruler, Compactor, IndexGateway},
 		Write:                    {Ingester, Distributor},
+		Cache:                    {GroupCache},
 		MemberlistKV:             {Server},
 	}
 

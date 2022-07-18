@@ -14,6 +14,11 @@ scrape_configs:
           - loki-frontend
         type: A
         port: 3100
+    relabel_configs:
+      - action: replace
+        source_labels:
+          - __meta_dns_name
+        target_label: service
   - job_name: 'promtail'
     dns_sd_configs:
       - names:

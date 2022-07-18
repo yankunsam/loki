@@ -18,9 +18,13 @@ common:
       access_key_id: loki
       secret_access_key: supersecret
       s3forcepathstyle: true
+  groupcache:
+    enabled: true
+    capacity_per_cache_mb: 10
+    restrict: true
 
 memberlist:
-  join_members: ["loki-read", "loki-write"]
+  join_members: ["loki-read", "loki-write", "loki-cache"]
   dead_node_reclaim_time: 30s
   gossip_to_dead_nodes_time: 15s
   left_ingesters_timeout: 30s
@@ -41,10 +45,10 @@ ingester:
   wal:
     enabled: true
     dir: /loki/wal
-  max_chunk_age: 1m
-  chunk_retain_period: 30s
+  max_chunk_age: 30s
+  chunk_retain_period: 1s
   chunk_encoding: snappy
-  chunk_target_size: 1.572864e+06
+  chunk_target_size: 1.0e+06
   chunk_block_size: 262144
   flush_op_timeout: 10s
 
