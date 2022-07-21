@@ -11,6 +11,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/opentracing/opentracing-go"
+	"github.com/opentracing/opentracing-go/ext"
+	otlog "github.com/opentracing/opentracing-go/log"
+	"github.com/weaveworks/common/grpc"
+	"github.com/weaveworks/common/user"
 	"golang.org/x/net/http2"
 
 	"github.com/weaveworks/common/instrument"
@@ -29,6 +34,8 @@ import (
 
 	"github.com/grafana/loki/pkg/logqlmodel/stats"
 	lokiutil "github.com/grafana/loki/pkg/util"
+	util_log "github.com/grafana/loki/pkg/util/log"
+	"github.com/grafana/loki/pkg/util/spanlogger"
 )
 
 var (
@@ -77,6 +84,51 @@ func (cfg *GroupCacheConfig) RegisterFlagsWithPrefix(prefix, _ string, f *flag.F
 		"NOTE: there are 3 caches (result, chunk, and index query), so the maximum used memory will be *triple* the value specified here.")
 }
 
+type tracedTransport struct {
+	inner http.RoundTripper
+}
+
+func newTracedTransport(inner http.RoundTripper) *tracedTransport {
+	return &tracedTransport{
+		inner: inner,
+	}
+}
+
+func (t *tracedTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	ctx := request.Context()
+
+	log, ctx := spanlogger.New(ctx, "groupcache.peer-request")
+	ext.SpanKindRPCClient.Set(log.Span)
+
+	log.LogFields(otlog.String("method", request.Method))
+	log.LogFields(otlog.String("url", request.URL.String()))
+	log.LogFields(otlog.String("host", request.Host))
+	log.LogFields(otlog.Int64("content-length", request.ContentLength))
+
+	if userID, err := user.ExtractUserID(ctx); err == nil {
+		log.SetTag("user", userID)
+	}
+
+	// TODO: add histrogram of request duration
+	resp, err := t.inner.RoundTrip(request)
+
+	if err != nil {
+		// TODO: handle HTTP 500 "cache miss" specifically
+
+		if !grpc.IsCanceled(err) {
+			ext.Error.Set(log.Span, true)
+		}
+		log.LogFields(otlog.Error(err))
+
+		level.Warn(log).Log("msg", "groupcache peer request failed", "err", err)
+	}
+	log.Finish()
+
+	level.Debug(log).Log("msg", "groupcache peer request", "status", resp.StatusCode)
+
+	return resp, err
+}
+
 type ringManager interface {
 	Addr() string
 	Ring() ring.ReadRing
@@ -86,11 +138,13 @@ func NewGroupCache(rm ringManager, config GroupCacheConfig, server *server.Serve
 	addr := fmt.Sprintf("http://%s", rm.Addr())
 	level.Info(logger).Log("msg", "groupcache local address set to", "addr", addr)
 
+	tripper := newTracedTransport(http2Transport)
+
 	pool := groupcache.NewHTTPPoolOpts(
 		addr,
 		&groupcache.HTTPPoolOptions{
 			Transport: func(_ context.Context) http.RoundTripper {
-				return http2Transport
+				return tripper
 			},
 		},
 	)
@@ -219,14 +273,17 @@ func (c *group) Fetch(ctx context.Context, keys []string) ([]string, [][]byte, [
 		sink   = groupcache.ByteViewSink(&data)
 	)
 
+	sp, ctxSp := opentracing.StartSpanFromContext(ctx, "groupcache.fetch")
+	defer sp.Finish()
+
 	for _, key := range keys {
-		if err := c.cache.Get(ctx, key, sink); err != nil {
+		if err := c.cache.Get(ctxSp, key, sink); err != nil {
 			if errors.Is(err, ErrGroupcacheMiss) {
 				missed = append(missed, key)
 				continue
 			}
 
-			level.Error(c.logger).Log("msg", "unable to fetch from groupcache", "err", err)
+			level.Error(util_log.WithContext(ctxSp, c.logger)).Log("msg", "unable to fetch from groupcache", "err", err)
 			return found, values, missed, err
 		}
 
@@ -241,10 +298,13 @@ func (c *group) Fetch(ctx context.Context, keys []string) ([]string, [][]byte, [
 func (c *group) Store(ctx context.Context, keys []string, values [][]byte) error {
 	start := time.Now()
 
+	sp, ctxSp := opentracing.StartSpanFromContext(ctx, "groupcache.store")
+	defer sp.Finish()
+
 	var lastErr error
 	for i, key := range keys {
-		if err := c.cache.Set(ctx, key, values[i], time.Time{}, true); err != nil {
-			level.Warn(c.logger).Log("msg", "failed to put to groupcache", "err", err)
+		if err := c.cache.Set(ctxSp, key, values[i], time.Time{}, true); err != nil {
+			level.Warn(util_log.WithContext(ctxSp, c.logger)).Log("msg", "failed to put to groupcache", "err", err)
 			lastErr = err
 		}
 	}
