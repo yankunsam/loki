@@ -19,7 +19,6 @@ import (
 	"github.com/grafana/loki/pkg/storage/config"
 	"github.com/grafana/loki/pkg/storage/stores/shipper/compactor"
 	"github.com/grafana/loki/pkg/storage/stores/shipper/storage"
-	"github.com/grafana/loki/pkg/storage/stores/shipper/util"
 	shipper_util "github.com/grafana/loki/pkg/storage/stores/shipper/util"
 )
 
@@ -313,7 +312,7 @@ func openBoltdbFileWithNoSync(path string) (*bbolt.DB, error) {
 func readFile(logger log.Logger, path string, writeBatch func(userID string, batch []indexEntry) error) error {
 	level.Debug(logger).Log("msg", "reading file for compaction", "path", path)
 
-	db, err := util.SafeOpenBoltdbFile(path)
+	db, err := openBoltdbFileWithNoSync(path)
 	if err != nil {
 		return err
 	}

@@ -179,6 +179,11 @@ func (c *CompactedIndex) ToIndexFile() (shipper_index.Index, error) {
 	}
 	fileName := fmt.Sprintf(fileNameFormat, shipper_util.BuildIndexFileName(c.tableName, uploaderName, fmt.Sprint(time.Now().Unix())))
 
+	// force sync the index
+	if err := c.compactedFile.Sync(); err != nil {
+		return nil, err
+	}
+
 	idxFile := indexfile.BoltDBToIndexFile(c.compactedFile, fileName)
 	c.compactedFile = nil
 	return idxFile, nil
