@@ -1,4 +1,4 @@
-module github.com/grafana/loki/v2
+module github.com/yankunsam/loki/v2
 
 go 1.18
 
@@ -334,3 +334,5 @@ replace github.com/prometheus/prometheus => github.com/prometheus/prometheus v0.
 // Replace memberlist with our fork which includes some fixes that haven't been
 // merged upstream yet.
 replace github.com/hashicorp/memberlist => github.com/grafana/memberlist v0.3.1-0.20220714140823-09ffed8adbbe
+
+replace github.com/grafana/loki => github.com/yankunsam/loki/v2 v2.6.1
