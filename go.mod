@@ -114,6 +114,7 @@ require (
 
 require (
 	github.com/grafana/groupcache_exporter v0.0.0-20220629095919-59a8c6428a43
+	github.com/grafana/loki v0.0.0-00010101000000-000000000000
 	github.com/heroku/x v0.0.50
 	github.com/mailgun/groupcache/v2 v2.3.2
 	github.com/prometheus/alertmanager v0.24.0
@@ -126,7 +127,6 @@ require (
 	cloud.google.com/go v0.100.2 // indirect
 	cloud.google.com/go/compute v1.6.1 // indirect
 	cloud.google.com/go/iam v0.1.0 // indirect
-	cloud.google.com/go/kms v1.0.0 // indirect
 	github.com/Azure/azure-sdk-for-go v65.0.0+incompatible // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20210617225240-d185dfc1b5a1 // indirect
 	github.com/Azure/go-autorest v14.2.0+incompatible // indirect
@@ -335,4 +335,3 @@ replace github.com/prometheus/prometheus => github.com/prometheus/prometheus v0.
 // merged upstream yet.
 replace github.com/hashicorp/memberlist => github.com/grafana/memberlist v0.3.1-0.20220714140823-09ffed8adbbe
 
-replace github.com/grafana/loki => github.com/yankunsam/loki/v2 v2.6.1
