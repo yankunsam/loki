@@ -31,12 +31,12 @@ const (
 
 // MetricConfig is a single metrics configuration.
 type MetricConfig struct {
-	MetricType   string  `mapstructure:"type"`
-	Description  string  `mapstructure:"description"`
-	Source       *string `mapstructure:"source"`
-	Prefix       string  `mapstructure:"prefix"`
-	IdleDuration *string `mapstructure:"max_idle_duration"`
-	maxIdleSec   int64
+	MetricType   string      `mapstructure:"type" yaml:"type"`
+	Description  string      `mapstructure:"description"`
+	Source       *string     `mapstructure:"source" yaml:"source,omitempty"`
+	Prefix       string      `mapstructure:"prefix" yaml:"prefix,omitempty"`
+	IdleDuration *string     `mapstructure:"max_idle_duration" yaml:"max_idle_duration,omitempty"`
+	maxIdleSec   int64       `yaml:"_"`
 	Config       interface{} `mapstructure:"config"`
 }
 
